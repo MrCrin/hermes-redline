@@ -1,6 +1,8 @@
-"""Redline backend: read Markdown files and persist annotation sidecars.
+"""Redline backend: read Markdown/code files and persist annotation sidecars.
 
 Mounted at /api/plugins/redline/ when the dashboard plugin is discovered.
+Code files are lexed with Pygments (already in the gateway venv) into a flat
+token list the desktop pane renders; any lexer failure degrades to plain text.
 """
 import json
 import os
@@ -9,12 +11,64 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 
+try:  # Pygments ships in the gateway venv transitively (via rich/pytest); a
+# minimal install may lack it — then code renders as plain text, never 500.
+    from pygments import lex
+    from pygments.lexers import TextLexer, get_lexer_for_filename
+    from pygments.util import ClassNotFound
+    _HAVE_PYGMENTS = True
+except ImportError:
+    _HAVE_PYGMENTS = False
+    lex = TextLexer = get_lexer_for_filename = None
+    ClassNotFound = Exception
+
 router = APIRouter()
 
 MAX_BYTES = 1_000_000
+MAX_TOKENS = 200_000
 _MD_EXT = {".md", ".markdown"}
 _CODE_EXT = {".py", ".sh", ".js", ".ts", ".c", ".h", ".cpp", ".go", ".rs", ".rb",
              ".yaml", ".yml", ".json", ".toml", ".sql"}
+
+# Pygments token dotted name -> redline CSS class; walk prefixes so
+# Token.Keyword.Constant -> Keyword, Token.Name.Function -> Name.Function.
+# Unmapped types render plain.
+_TOKEN_CLASS = {
+    "Keyword": "kw", "Name.Function": "fn", "Name.Class": "typ",
+    "String": "str", "Comment": "com", "Number": "num",
+    "Operator": "op", "Name.Decorator": "dec",
+}
+
+
+def _token_class(ttype) -> str:
+    s = str(ttype)  # canonical dotted name, e.g. Token.Literal.String.Doc
+    for key, cls in _TOKEN_CLASS.items():
+        if ("." + key + ".") in s or s.endswith("." + key):
+            return cls
+    return ""
+
+
+def _tokens(p: Path, content: str) -> list:
+    if not _HAVE_PYGMENTS:
+        return []
+    try:
+        lexer = get_lexer_for_filename(p.name, text=content, stripnl=False,
+                                        ensurenl=False, encoding="utf-8")
+    except (ClassNotFound, Exception):
+        lexer = TextLexer(stripnl=False, ensurenl=False)
+    out = []
+    try:
+        for ttype, value in lex(content, lexer):
+            cls = _token_class(ttype)
+            if out and out[-1][0] == cls:
+                out[-1][1] += value
+            else:
+                out.append([cls, value])
+            if len(out) > MAX_TOKENS:
+                return []  # pathological file: pane falls back to plain content
+    except Exception:
+        return []
+    return out
 
 
 def _resolve(path: str) -> Path:
@@ -65,7 +119,9 @@ def _write_sidecar(sc: Path, items: list) -> None:
 @router.get("/doc")
 def read_doc(path: str = Query(...)):
     p = _resolve(path)
-    return {"path": str(p), "content": p.read_text(encoding="utf-8", errors="replace")}
+    content = p.read_text(encoding="utf-8", errors="replace")
+    tokens = _tokens(p, content) if p.suffix.lower() in _CODE_EXT else []
+    return {"path": str(p), "content": content, "tokens": tokens}
 
 
 @router.get("/annotations")

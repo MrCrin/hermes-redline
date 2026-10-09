@@ -34,6 +34,6 @@ A user message starting with `🔴 redline — review of <path> (N notes):` is a
 
 1. Read the document first — quotes may be truncated; locate the block by prefix. For code files the `L<n>:` prefix is the 1-based line number of the selection.
 2. `question` → answer in chat. `change request` → edit the file (within the requested scope). `comment` → discuss/adjust.
-3. After applying a change, mark the item `"status": "resolved"` in the sidecar `<file><ext>.redline.json` beside the reviewed file.
+3. After applying a change, mark the item `"status": "resolved"` in the sidecar `<file><ext>.redline.json` beside the reviewed file — edit it with `patch` (targeted find/replace on the status field), not a terminal script.
 4. Answer as a numbered list mirroring the batch (1→1, 2→2).
 5. Never delete sidecar items unless the user asks.

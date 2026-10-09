@@ -47,6 +47,14 @@ const CSS = `
 .rl-line{display:flex;gap:10px;font-family:var(--ui-font-mono,ui-monospace,monospace);font-size:12.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
 .rl-ln{flex:none;min-width:2.5em;text-align:right;color:var(--ui-text-quaternary);user-select:none}
 .rl-code{flex:1;min-width:0}
+.rl-tok-str{color:var(--ui-green)}
+.rl-tok-com{color:var(--ui-text-quaternary);font-style:italic}
+.rl-tok-kw{color:var(--ui-purple)}
+.rl-tok-num{color:var(--ui-orange)}
+.rl-tok-fn{color:var(--ui-accent)}
+.rl-tok-typ{color:var(--ui-accent);font-weight:600}
+.rl-tok-op{color:var(--ui-text-secondary)}
+.rl-tok-dec{color:var(--ui-orange)}
 .rl-doc mark{background:var(--rl-soft);color:inherit;border-radius:3px;padding:1px 2px;box-shadow:inset 0 -1px 0 var(--rl-line)}
 .rl-doc mark.rl-sent{opacity:.45}
 .rl-marker{position:absolute;right:-26px;top:2px;width:20px;height:20px;border-radius:6px;border:1px solid var(--rl-line);background:var(--rl-soft);color:var(--rl-line);font-size:11px;line-height:1;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center}
@@ -71,6 +79,23 @@ const CSS = `
 .rl-chip:hover{color:var(--ui-text-primary)}
 .rl-chip b{font-weight:600;color:var(--ui-accent)}
 `
+
+// Tokens come lexed from the backend (Pygments) as a flat [class, text] list
+// covering the whole file, newlines included; we split them back into lines so
+// the gutter line numbers stay aligned. Empty list = plain-text fallback.
+function tokensToLines(tokens) {
+  const lines = [[]]
+  let k = 0
+  for (const [cls, text] of tokens) {
+    const parts = String(text).split('\n')
+    for (let i = 0; i < parts.length; i++) {
+      if (i > 0) lines.push([])
+      const line = lines[lines.length - 1]
+      if (parts[i]) line.push(cls ? jsx('span', { key: String(k++), className: `rl-tok-${cls}`, children: parts[i] }) : parts[i])
+    }
+  }
+  return lines
+}
 
 function blockQuote(block, sel) {
   const i = block.indexOf(sel)
@@ -161,10 +186,12 @@ function RedlinePane({ ctx, file }) {
     return () => $openCount.set(0)
   }, [open.length])
 
-  const blocks = !active || !docQ.data ? [] : (CODE_EXT.test(active)
+  const isCode = active && CODE_EXT.test(active)
+  const tokLines = isCode && docQ.data && docQ.data.tokens && docQ.data.tokens.length
+    ? tokensToLines(docQ.data.tokens) : null
+  const blocks = !active || !docQ.data ? [] : (isCode
     ? docQ.data.content.split('\n')
     : docQ.data.content.split(/\n[ \t]*\n/))
-  const isCode = active && CODE_EXT.test(active)
 
   useEffect(() => { if (file) { setActive(file); setPath(file) } }, [file])
 
@@ -265,7 +292,7 @@ function RedlinePane({ ctx, file }) {
                 isCode
                   ? jsxs('div', { className: 'rl-line', children: [
                       jsx('span', { className: 'rl-ln', children: String(i + 1) }),
-                      jsx('span', { className: 'rl-code', children: b || ' ' }),
+                      jsx('span', { className: 'rl-code', children: (tokLines && tokLines[i]) || b || ' ' }),
                     ] })
                   : jsx(MessageTextContent, { text: b, media: false }),
                 ...items.filter((a) => a.block === i).map((a) => {

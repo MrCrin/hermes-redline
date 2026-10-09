@@ -13,6 +13,8 @@ router = APIRouter()
 
 MAX_BYTES = 1_000_000
 _MD_EXT = {".md", ".markdown"}
+_CODE_EXT = {".py", ".sh", ".js", ".ts", ".c", ".h", ".cpp", ".go", ".rs", ".rb",
+             ".yaml", ".yml", ".json", ".toml", ".sql"}
 
 
 def _resolve(path: str) -> Path:
@@ -21,8 +23,8 @@ def _resolve(path: str) -> Path:
         p = Path(os.path.expanduser(str(path).strip())).resolve(strict=True)
     except OSError as exc:
         raise HTTPException(404, f"file not found: {path}") from exc
-    if p.suffix.lower() not in _MD_EXT:
-        raise HTTPException(400, "redline reads .md/.markdown files only")
+    if p.suffix.lower() not in (_MD_EXT | _CODE_EXT):
+        raise HTTPException(400, "redline reads Markdown and source files only")
     if not p.is_file():
         raise HTTPException(404, f"not a file: {p}")
     if p.stat().st_size > MAX_BYTES:

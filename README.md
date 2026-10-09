@@ -70,7 +70,7 @@ Agent-side hooks remember eligible Markdown files written via `write_file` or `p
 
 ## Roadmap
 
-- Source-code review for files such as `.py` and `.sh` is planned for v0.2; current releases review Markdown only.
+- Source-code review shipped in 0.2: `.py`, `.sh`, `.js`, configs and more open as numbered lines; select any span, annotate, batch back with `L<n>:` line anchors.
 
 ## Known limits
 

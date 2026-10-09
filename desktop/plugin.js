@@ -18,6 +18,9 @@ const KINDS = {
 
 const $openCount = atom(0)
 
+const MD_EXT = /\.(md|markdown)$/i
+const CODE_EXT = /\.(py|sh|js|ts|tsx|c|h|cpp|go|rs|rb|yaml|yml|json|toml|sql)$/i
+
 const CSS = `
 .rl-root{position:relative;height:100%;display:flex;flex-direction:column;padding:18px 22px;
   --rl-comment:var(--ui-accent);--rl-question:var(--ui-purple);--rl-change:var(--ui-orange);
@@ -41,6 +44,9 @@ const CSS = `
 .rl-doc th,.rl-doc td{border:1px solid var(--ui-stroke-secondary);padding:5px 10px;text-align:left}
 .rl-doc a{color:var(--ui-accent)}
 .rl-doc [data-rl-block]:hover{background:color-mix(in oklab,var(--ui-accent) 5%,transparent)}
+.rl-line{display:flex;gap:10px;font-family:var(--ui-font-mono,ui-monospace,monospace);font-size:12.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
+.rl-ln{flex:none;min-width:2.5em;text-align:right;color:var(--ui-text-quaternary);user-select:none}
+.rl-code{flex:1;min-width:0}
 .rl-doc mark{background:var(--rl-soft);color:inherit;border-radius:3px;padding:1px 2px;box-shadow:inset 0 -1px 0 var(--rl-line)}
 .rl-doc mark.rl-sent{opacity:.45}
 .rl-marker{position:absolute;right:-26px;top:2px;width:20px;height:20px;border-radius:6px;border:1px solid var(--rl-line);background:var(--rl-soft);color:var(--rl-line);font-size:11px;line-height:1;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center}
@@ -79,7 +85,8 @@ export function buildBatchMessage(path, items) {
   const head = `🔴 redline — review of ${path} (${items.length} notes):`
   const body = items.map((a, i) => {
     const k = KINDS[a.kind] || KINDS.comment
-    return `${i + 1}. [${k.label}] selection: "${a.quote}"\n   → ${a.note}`
+    const quote = a.line ? `L${a.line}: ${a.quote}` : a.quote
+    return `${i + 1}. [${k.label}] selection: "${quote}"\n   → ${a.note}`
   })
   return [head, ...body].join('\n')
 }
@@ -154,7 +161,10 @@ function RedlinePane({ ctx, file }) {
     return () => $openCount.set(0)
   }, [open.length])
 
-  const blocks = active && docQ.data ? docQ.data.content.split(/\n[ \t]*\n/) : []
+  const blocks = !active || !docQ.data ? [] : (CODE_EXT.test(active)
+    ? docQ.data.content.split('\n')
+    : docQ.data.content.split(/\n[ \t]*\n/))
+  const isCode = active && CODE_EXT.test(active)
 
   useEffect(() => { if (file) { setActive(file); setPath(file) } }, [file])
 
@@ -197,7 +207,8 @@ function RedlinePane({ ctx, file }) {
   const openKind = (kind) => {
     if (!pill) return
     const id = `a${Date.now()}`
-    save([...items, { id, kind, block: pill.block, quote: pill.quote, note: '', status: 'open', draft: true }])
+    const line = isCode ? pill.block + 1 : undefined
+    save([...items, { id, kind, block: pill.block, quote: pill.quote, note: '', status: 'open', draft: true, line }])
     setShown(id)
     setDraftText('')
     setPill(null)
@@ -235,7 +246,7 @@ function RedlinePane({ ctx, file }) {
     jsxs('div', { className: 'rl-head', children: [
       jsx('span', { className: 'rl-title', children: 'redline' }),
       active ? jsx('span', { className: 'rl-path', title: active, children: active }) : null,
-      jsx(Input, { value: path, placeholder: 'Markdown file path', className: 'w-64', onChange: (e) => setPath(e.target.value), onKeyDown: (e) => { if (e.key === 'Enter') load() } }),
+      jsx(Input, { value: path, placeholder: 'File path (Markdown or code)', className: 'w-64', onChange: (e) => setPath(e.target.value), onKeyDown: (e) => { if (e.key === 'Enter') load() } }),
       jsx(Button, { size: 'sm', variant: 'outline', onClick: load, children: 'open' }),
       recent.length ? jsx('span', { style: { display: 'flex', gap: 4, flexWrap: 'wrap' }, children: recent.map((r) => jsx(Button, { size: 'sm', variant: 'ghost', className: 'rl-chip', onClick: () => { setActive(r); setPath(r) } }, r.split('/').pop())) }) : null,
       jsx('span', { style: { marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }, children: [
@@ -251,7 +262,12 @@ function RedlinePane({ ctx, file }) {
           : docQ.isError
             ? jsx('div', { className: 'rl-empty', children: `could not read ${active} — check the path (the redline backend must be active)` })
             : blocks.map((b, i) => jsxs('div', { 'data-rl-block': String(i), className: 'rl-block', children: [
-                jsx(MessageTextContent, { text: b, media: false }),
+                isCode
+                  ? jsxs('div', { className: 'rl-line', children: [
+                      jsx('span', { className: 'rl-ln', children: String(i + 1) }),
+                      jsx('span', { className: 'rl-code', children: b || ' ' }),
+                    ] })
+                  : jsx(MessageTextContent, { text: b, media: false }),
                 ...items.filter((a) => a.block === i).map((a) => {
                   const k = KINDS[a.kind] || KINDS.comment
                   return jsx('button', {
@@ -317,7 +333,7 @@ export default {
           name: 'redline', // The agent writes ::redline{file="/path/to/document.md"}
           render: ({ attrs }) => {
             const file = String(attrs.file || '').trim()
-            if (!file || !/\.(md|markdown)$/i.test(file)) return null
+            if (!file || !(MD_EXT.test(file) || CODE_EXT.test(file))) return null
             return jsxs('div', {
               className: 'rl-card', style: { '--rl-line': 'var(--rl-change)', maxWidth: 460 }, children: [
                 jsxs('div', { className: 'rl-kind', children: [jsx(KindIcon, { kind: 'change' }), 'guided review'] }),

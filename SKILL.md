@@ -13,7 +13,7 @@ This bundled skill is available as `redline:reading`.
 
 ## Emit the card
 
-After writing a Markdown file the user will likely read or review (report, plan, doc, manuscript, draft PR/README — anything written "for them to see"), end the response with a lone line:
+After writing a file the user will likely review — Markdown (report, plan, doc, manuscript, draft PR/README) or source code (`.py`, `.sh`, `.js`, configs) — end the response with a lone line:
 
 ```
 ::redline{file="/absolute/path.md"}
@@ -28,12 +28,12 @@ When the plugin's hooks are active they append the directive automatically for f
 A user message starting with `🔴 redline — review of <path> (N notes):` is a review batch from the pane:
 
 ```
-1. [comment|question|change request] quote: "..."
+1. [comment|question|change request] selection: "quote"   # code files: "L42: quote"
    → the user's note
 ```
 
-1. Read the document first — quotes may be truncated; locate the block by prefix.
+1. Read the document first — quotes may be truncated; locate the block by prefix. For code files the `L<n>:` prefix is the 1-based line number of the selection.
 2. `question` → answer in chat. `change request` → edit the file (within the requested scope). `comment` → discuss/adjust.
-3. After applying a change, mark the item `"status": "resolved"` in the sidecar `<file>.md.redline.json`.
+3. After applying a change, mark the item `"status": "resolved"` in the sidecar `<file><ext>.redline.json` beside the reviewed file.
 4. Answer as a numbered list mirroring the batch (1→1, 2→2).
 5. Never delete sidecar items unless the user asks.

@@ -1,8 +1,8 @@
 """Redline agent-side hooks: make the ::redline{...} card automatic.
 
-post_tool_call  — remember Markdown files this agent turn wrote (write_file/patch).
-transform_llm_output — if the final response delivered a reviewable Markdown file
-and the agent did not emit a ::redline directive itself, append one.
+post_tool_call  — remember Markdown/source files this agent turn wrote (write_file/patch).
+transform_llm_output — if the final response delivered a reviewable file
+and the agent did not emit a ::redline directive itself, append one (desktop only).
 
 Observer/transform only; no core overrides. Fail-soft by design: any error here
 must never affect the response.
@@ -15,6 +15,8 @@ from pathlib import Path
 
 _DIRECTIVE_RE = re.compile(r"::redline\{")
 _MD_EXT = {".md", ".markdown"}
+_CODE_EXT = {".py", ".sh", ".js", ".ts", ".c", ".h", ".cpp", ".go", ".rs", ".rb",
+             ".yaml", ".yml", ".json", ".toml", ".sql"}
 # ponytail: path heuristics instead of a config knob; add config_schema if users want opt-out granularity.
 _SKIP_SUBSTRINGS = ("/.hermes/cache/", "/.redline.json", "/skills/", "/.git/")
 _MIN_BYTES = 200
@@ -27,7 +29,8 @@ def _eligible(path: str) -> bool:
         p = Path(path).expanduser()
     except Exception:
         return False
-    if p.suffix.lower() not in _MD_EXT:
+    ext = p.suffix.lower()
+    if ext not in _MD_EXT and ext not in _CODE_EXT:
         return False
     s = str(p)
     if any(sub in s for sub in _SKIP_SUBSTRINGS):
@@ -35,7 +38,7 @@ def _eligible(path: str) -> bool:
     if p.name.lower() in {"readme.md", "skill.md", "agents.md", "changelog.md"}:
         return False
     try:
-        if not p.is_file() or p.stat().st_size < _MIN_BYTES:
+        if not p.is_file() or p.stat().st_size < (_MIN_BYTES if ext in _MD_EXT else 40):
             return False
     except OSError:
         return False
@@ -83,5 +86,5 @@ def register(ctx):
     if skill_md.is_file():
         ctx.register_skill(
             "reading", skill_md,
-            description="Use when a redline batch arrives from the desktop panel, or after delivering a Markdown document the user will read.",
+            description="Use when a redline batch arrives from the desktop panel, or after delivering a Markdown document or source file the user will review.",
         )

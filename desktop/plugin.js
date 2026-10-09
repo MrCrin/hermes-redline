@@ -107,7 +107,7 @@ function blockQuote(block, sel) {
 }
 
 export function buildBatchMessage(path, items) {
-  const head = `🔴 redline — review of ${path} (${items.length} notes):`
+  const head = `🔴 redline — review of ${path} (${items.length} notes). Change requests: edit ${path} in place — do not create a new copy or file.`
   const body = items.map((a, i) => {
     const k = KINDS[a.kind] || KINDS.comment
     const quote = a.line ? `L${a.line}: ${a.quote}` : a.quote

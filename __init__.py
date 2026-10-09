@@ -11,17 +11,26 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 _DIRECTIVE_RE = re.compile(r"::redline\{")
 _MD_EXT = {".md", ".markdown"}
-_CODE_EXT = {".py", ".sh", ".js", ".ts", ".c", ".h", ".cpp", ".go", ".rs", ".rb",
-             ".yaml", ".yml", ".json", ".toml", ".sql"}
+_CODE_EXT = (".py", ".sh", ".js", ".ts", ".tsx", ".c", ".h", ".cpp", ".go", ".rs", ".rb",
+             ".yaml", ".yml", ".json", ".toml", ".sql")
 # ponytail: path heuristics instead of a config knob; add config_schema if users want opt-out granularity.
-_SKIP_SUBSTRINGS = ("/.hermes/cache/", "/.redline.json", "/skills/", "/.git/")
 _MIN_BYTES = 200
 
 _written: dict[str, str] = {}
+
+
+def _skip_path(path: str | Path) -> bool:
+    parts = tuple(part.lower() for part in PurePosixPath(str(path).replace("\\", "/")).parts)
+    return (
+        any(parts[i:i + 2] == (".hermes", "cache") for i in range(len(parts) - 1))
+        or "skills" in parts
+        or ".git" in parts
+        or bool(parts and parts[-1].endswith(".redline.json"))
+    )
 
 
 def _eligible(path: str) -> bool:
@@ -32,8 +41,7 @@ def _eligible(path: str) -> bool:
     ext = p.suffix.lower()
     if ext not in _MD_EXT and ext not in _CODE_EXT:
         return False
-    s = str(p)
-    if any(sub in s for sub in _SKIP_SUBSTRINGS):
+    if _skip_path(path):
         return False
     if p.name.lower() in {"readme.md", "skill.md", "agents.md", "changelog.md"}:
         return False

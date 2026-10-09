@@ -2,9 +2,9 @@
 
 **Read what Hermes writes — and fight back in the margins.**
 
-Hermes writes a lot of Markdown for you: reports, plans, docs, analyses. Reading it in chat is fine. *Reviewing* it in chat is painful — you copy a paragraph, paste it, explain which paragraph, hope the agent gets it.
+Hermes writes a lot of Markdown and source code for you: reports, plans, docs, analyses, scripts. Reading it in chat is fine. *Reviewing* it in chat is painful — you copy a paragraph or line, paste it, explain which part, hope the agent gets it.
 
-Redline turns any Markdown document into a review surface inside Hermes Desktop. Select a sentence. Drop a **comment**, a **question**, or a **change request** right on top of it. Queue as many as you like — or fire one immediately. The whole batch lands back in the chat as a structured message the agent acts on, and the pane live-refreshes as it edits the file.
+Redline turns Markdown documents and supported source files into a review surface inside Hermes Desktop. Select a sentence or line span. Drop a **comment**, a **question**, or a **change request** right on top of it. Queue as many as you like — or fire one immediately. The whole batch lands back in the chat as a structured message the agent acts on, and the pane live-refreshes as it edits the file.
 
 ![redline](docs/banner.png)
 
@@ -12,11 +12,11 @@ Redline turns any Markdown document into a review surface inside Hermes Desktop.
 
 ![the review pane](docs/screenshot.png)
 
-- When the agent writes a reviewable Markdown document with Hermes file tools, Redline automatically adds its card to the final response; agents can still emit a card manually when needed.
-- One click opens the document in a pane docked beside the chat — same reading surface as the chat, rendered with the app's own Markdown renderer and your theme's colors.
+- When the agent writes a reviewable Markdown document or supported source file with Hermes file tools, Redline automatically adds its card to the final response; agents can still emit a card manually when needed.
+- One click opens the file in a pane docked beside the chat — Markdown uses the app's own renderer; source files use numbered lines with optional syntax highlighting and your theme's colors.
 - Select any passage → a pill offers ◆ comment · ◇ question · ✎ change request.
 - Each annotation becomes a floating card over the text, with a small marker in the margin so you always see where the open threads are.
-- Annotations persist in a sidecar next to your document (`doc.md.redline.json`) — close the pane, come back tomorrow, your review is still there.
+- Annotations persist in a sidecar next to your file (`<file><ext>.redline.json`, such as `doc.md.redline.json` or `app.tsx.redline.json`) — close the pane, come back tomorrow, your review is still there.
 
 ## The loop
 
@@ -56,21 +56,21 @@ Three pieces, no core patches — everything through the Desktop plugin SDK:
 | piece | role |
 |---|---|
 | `desktop/plugin.js` | transcript directive, review pane, selection pill, floating cards, margin markers, batch composer |
-| `dashboard/plugin_api.py` | tiny FastAPI backend: reads the document, persists annotations |
-| `<document>.md.redline.json` | sidecar beside your document — the annotation list, yours to keep |
+| `dashboard/plugin_api.py` | tiny FastAPI backend: reads Markdown/source files and persists annotations |
+| `<file><ext>.redline.json` | sidecar beside your file — the annotation list, yours to keep |
 
-Agent-side hooks remember eligible Markdown files written via `write_file` or `patch` and append the card directive automatically at the end of the response. The agent side is otherwise just a message format: a batch arrives as `⁂ redline — review of <path> (N notes):` with numbered quotes and requests, which any Hermes agent can act on.
+Agent-side hooks remember eligible Markdown/source files written via `write_file` or `patch` and append the card directive automatically at the end of the response. The agent side is otherwise just a message format: a batch arrives as `⁂ redline — review of <path> (N notes):` with numbered `selection:` entries; code selections include `L<n>:` line anchors, which any Hermes agent can act on.
 
 ## Disclosure
 
-- Reads any local `.md`/`.markdown` path you name (max 1 MB) and writes only the sidecar beside it. It is a local review tool, not a sandboxed document service.
+- Reads any local `.md`/`.markdown` or supported source-file path you name (max 1 MB) and writes only the sidecar beside it. Reviewed paths and sidecars live on the gateway host, not the Desktop client machine (relevant when using a remote gateway). It is a local review tool, not a sandboxed document service.
 - No network calls beyond the local Hermes gateway. No credentials touched. No telemetry.
 - The pane polls the backend every 3 s while open so agent edits show up live.
-- The `transform_llm_output` hook modifies the final agent response by appending a `::redline{file="..."}` directive after an eligible Markdown file is delivered. Hermes renders that trailing directive as the review card, using the same directive mechanism as core previews.
+- The `transform_llm_output` hook modifies the final agent response by appending a `::redline{file="..."}` directive after an eligible Markdown or source file is delivered. Hermes renders that trailing directive as the review card, using the same directive mechanism as core previews.
 
-## Roadmap
+## Supported files
 
-- Source-code review shipped in 0.2: `.py`, `.sh`, `.js`, configs and more open as numbered lines; select any span, annotate, batch back with `L<n>:` line anchors.
+Markdown: `.md`, `.markdown`. Source/config: `.py`, `.sh`, `.js`, `.ts`, `.tsx`, `.c`, `.h`, `.cpp`, `.go`, `.rs`, `.rb`, `.yaml`, `.yml`, `.json`, `.toml`, `.sql`. Source files render as numbered lines; batch selections carry `L<n>:` anchors.
 
 ## Known limits
 

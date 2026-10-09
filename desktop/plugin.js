@@ -1,7 +1,7 @@
-// Redline — guided Markdown review in Hermes Desktop.
-// The directive opens a .md file for selected-text annotations, then sends a
+// Redline — guided Markdown and source-code review in Hermes Desktop.
+// The directive opens a reviewable file for selected-text annotations, then sends a
 // batch of comments, questions, or change requests to the agent composer.
-// Persistence: <file>.redline.json sidecar.
+// Persistence: <file><ext>.redline.json sidecar.
 
 import {
   Badge, Button, Codicon, Input, MessageTextContent, STATUSBAR_AREAS,
@@ -18,8 +18,10 @@ const KINDS = {
 
 const $openCount = atom(0)
 
-const MD_EXT = /\.(md|markdown)$/i
-const CODE_EXT = /\.(py|sh|js|ts|tsx|c|h|cpp|go|rs|rb|yaml|yml|json|toml|sql)$/i
+const MD_EXT = ['.md', '.markdown']
+const CODE_EXT = ['.py', '.sh', '.js', '.ts', '.tsx', '.c', '.h', '.cpp', '.go', '.rs', '.rb',
+  '.yaml', '.yml', '.json', '.toml', '.sql']
+const hasExt = (path, extensions) => extensions.some((extension) => path.toLowerCase().endsWith(extension))
 
 const CSS = `
 .rl-root{position:relative;height:100%;display:flex;flex-direction:column;padding:18px 22px;
@@ -187,7 +189,7 @@ function RedlinePane({ ctx, file }) {
     return () => $openCount.set(0)
   }, [open.length])
 
-  const isCode = active && CODE_EXT.test(active)
+  const isCode = active && hasExt(active, CODE_EXT)
   const tokLines = isCode && docQ.data && docQ.data.tokens && docQ.data.tokens.length
     ? tokensToLines(docQ.data.tokens) : null
   const blocks = !active || !docQ.data ? [] : (isCode
@@ -358,10 +360,10 @@ export default {
         id: 'directive',
         area: TRANSCRIPT_DIRECTIVE_AREA,
         data: {
-          name: 'redline', // The agent writes ::redline{file="/path/to/document.md"}
+          name: 'redline', // The agent writes ::redline{file="/path/to/reviewable-file"}
           render: ({ attrs }) => {
             const file = String(attrs.file || '').trim()
-            if (!file || !(MD_EXT.test(file) || CODE_EXT.test(file))) return null
+            if (!file || !(hasExt(file, MD_EXT) || hasExt(file, CODE_EXT))) return null
             return jsxs('div', {
               className: 'rl-card', style: { '--rl-line': 'var(--ui-red)', maxWidth: 460 }, children: [
                 jsxs('div', { className: 'rl-kind', children: [jsx('span', { className: 'rl-asterisk', children: '⁂' }), 'guided review'] }),

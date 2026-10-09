@@ -1,25 +1,25 @@
 ---
 name: reading
-description: Use when a redline batch arrives from the desktop panel, or after delivering a Markdown document the user will read or review.
+description: Use when a redline batch arrives from the desktop panel, or after delivering a Markdown document or source file the user will read or review.
 version: 1.0.0
 metadata:
   hermes:
-    tags: [desktop, review, markdown]
+    tags: [desktop, review, markdown, code]
 ---
 
-# redline (guided Markdown review)
+# redline (guided Markdown and code review)
 
 This bundled skill is available as `redline:reading`.
 
 ## Emit the card
 
-After writing a file the user will likely review — Markdown (report, plan, doc, manuscript, draft PR/README) or source code (`.py`, `.sh`, `.js`, configs) — end the response with a lone line:
+After writing a file the user will likely review — Markdown (report, plan, doc, manuscript, draft PR/README) or supported source/config code — end the response with a lone line:
 
 ```
-::redline{file="/absolute/path.md"}
+::redline{file="/absolute/path/to/file"}
 ```
 
-The installed plugin renders a card in the transcript; one click opens the document in the Redline review pane docked beside the chat. Do not emit for trivial Markdown (sidecars, scratch, internal notes, READMEs of repos).
+The installed plugin renders a card in the transcript; one click opens the file in the Redline review pane docked beside the chat. Do not emit for trivial files (sidecars, scratch, internal notes, READMEs of repos).
 
 When the plugin's hooks are active they append the directive automatically for files written with `write_file`/`patch` in the turn; check the response already contains `::redline{` before adding one manually — never emit twice.
 
@@ -32,7 +32,7 @@ A user message starting with `⁂ redline — review of <path> (N notes):` is a 
    → the user's note
 ```
 
-1. Read the document first — quotes may be truncated; locate the block by prefix. For code files the `L<n>:` prefix is the 1-based line number of the selection.
+1. Read the file first — quotes may be truncated; locate the block by prefix. For code files the `L<n>:` prefix is the 1-based line number of the selection.
 2. `question` → answer in chat. `change request` → edit the reviewed file IN PLACE (within the requested scope; never create a copy or a new file unless the user explicitly asks). This IN-PLACE rule overrides any general "never modify working code — create a new file instead" convention for files opened through the redline panel. `comment` → discuss/adjust.
 3. After applying a change, mark the item `"status": "resolved"` in the sidecar `<file><ext>.redline.json` beside the reviewed file — edit it with `patch` (targeted find/replace on the status field), not a terminal script.
 4. Answer as a numbered list mirroring the batch (1→1, 2→2).

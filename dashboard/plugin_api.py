@@ -27,8 +27,8 @@ router = APIRouter()
 MAX_BYTES = 1_000_000
 MAX_TOKENS = 200_000
 _MD_EXT = {".md", ".markdown"}
-_CODE_EXT = {".py", ".sh", ".js", ".ts", ".c", ".h", ".cpp", ".go", ".rs", ".rb",
-             ".yaml", ".yml", ".json", ".toml", ".sql"}
+_CODE_EXT = (".py", ".sh", ".js", ".ts", ".tsx", ".c", ".h", ".cpp", ".go", ".rs", ".rb",
+             ".yaml", ".yml", ".json", ".toml", ".sql")
 
 # Pygments token dotted name -> redline CSS class; walk prefixes so
 # Token.Keyword.Constant -> Keyword, Token.Name.Function -> Name.Function.
@@ -77,7 +77,7 @@ def _resolve(path: str) -> Path:
         p = Path(os.path.expanduser(str(path).strip())).resolve(strict=True)
     except OSError as exc:
         raise HTTPException(404, f"file not found: {path}") from exc
-    if p.suffix.lower() not in (_MD_EXT | _CODE_EXT):
+    if p.suffix.lower() not in (_MD_EXT | set(_CODE_EXT)):
         raise HTTPException(400, "redline reads Markdown and source files only")
     if not p.is_file():
         raise HTTPException(404, f"not a file: {p}")
@@ -119,7 +119,7 @@ def _write_sidecar(sc: Path, items: list) -> None:
 @router.get("/doc")
 def read_doc(path: str = Query(...)):
     p = _resolve(path)
-    content = p.read_text(encoding="utf-8", errors="replace")
+    content = p.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n")
     tokens = _tokens(p, content) if p.suffix.lower() in _CODE_EXT else []
     return {"path": str(p), "content": content, "tokens": tokens}
 

@@ -59,7 +59,7 @@ Three pieces, no core patches — everything through the Desktop plugin SDK:
 | `dashboard/plugin_api.py` | tiny FastAPI backend: reads the document, persists annotations |
 | `<document>.md.redline.json` | sidecar beside your document — the annotation list, yours to keep |
 
-Agent-side hooks remember eligible Markdown files written via `write_file` or `patch` and append the card directive automatically at the end of the response. The agent side is otherwise just a message format: a batch arrives as `🔴 redline — review of <path> (N notes):` with numbered quotes and requests, which any Hermes agent can act on.
+Agent-side hooks remember eligible Markdown files written via `write_file` or `patch` and append the card directive automatically at the end of the response. The agent side is otherwise just a message format: a batch arrives as `⁂ redline — review of <path> (N notes):` with numbered quotes and requests, which any Hermes agent can act on.
 
 ## Disclosure
 

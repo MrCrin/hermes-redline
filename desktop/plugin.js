@@ -55,6 +55,7 @@ const CSS = `
 .rl-tok-typ{color:var(--ui-accent);font-weight:600}
 .rl-tok-op{color:var(--ui-text-secondary)}
 .rl-tok-dec{color:var(--ui-orange)}
+.rl-asterisk{color:var(--ui-red);font-weight:700;font-size:15px;line-height:1}
 .rl-doc mark{background:var(--rl-soft);color:inherit;border-radius:3px;padding:1px 2px;box-shadow:inset 0 -1px 0 var(--rl-line)}
 .rl-doc mark.rl-sent{opacity:.45}
 .rl-marker{position:absolute;right:-26px;top:2px;width:20px;height:20px;border-radius:6px;border:1px solid var(--rl-line);background:var(--rl-soft);color:var(--rl-line);font-size:11px;line-height:1;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center}
@@ -107,7 +108,7 @@ function blockQuote(block, sel) {
 }
 
 export function buildBatchMessage(path, items) {
-  const head = `🔴 redline — review of ${path} (${items.length} notes). Change requests: edit ${path} in place — do not create a new copy or file.`
+  const head = `⁂ redline — review of ${path} (${items.length} notes). Change requests: edit ${path} in place — do not create a new copy or file.`
   const body = items.map((a, i) => {
     const k = KINDS[a.kind] || KINDS.comment
     const quote = a.line ? `L${a.line}: ${a.quote}` : a.quote
@@ -362,8 +363,8 @@ export default {
             const file = String(attrs.file || '').trim()
             if (!file || !(MD_EXT.test(file) || CODE_EXT.test(file))) return null
             return jsxs('div', {
-              className: 'rl-card', style: { '--rl-line': 'var(--rl-change)', maxWidth: 460 }, children: [
-                jsxs('div', { className: 'rl-kind', children: [jsx(KindIcon, { kind: 'change' }), 'guided review'] }),
+              className: 'rl-card', style: { '--rl-line': 'var(--ui-red)', maxWidth: 460 }, children: [
+                jsxs('div', { className: 'rl-kind', children: [jsx('span', { className: 'rl-asterisk', children: '⁂' }), 'guided review'] }),
                 jsx('div', { className: 'rl-note', children: file }),
                 jsx('div', { className: 'rl-foot', children: jsx(Button, {
                   size: 'sm',

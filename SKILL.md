@@ -25,7 +25,7 @@ When the plugin's hooks are active they append the directive automatically for f
 
 ## Handle a batch
 
-A user message starting with `🔴 redline — review of <path> (N notes):` is a review batch from the pane:
+A user message starting with `⁂ redline — review of <path> (N notes):` is a review batch from the pane:
 
 ```
 1. [comment|question|change request] selection: "quote"   # code files: "L42: quote"

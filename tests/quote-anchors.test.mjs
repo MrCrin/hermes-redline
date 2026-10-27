@@ -148,6 +148,17 @@ test('a single rect is left alone, and unsorted input still merges', () => {
   assert.deepEqual(sorted, [{ left: 0, top: 10, width: 126, height: 20 }])
 })
 
+test('offsets keep a repeated phrase on the occurrence that was selected', () => {
+  // The plain quote is ambiguous, so matching alone would take the first occurrence; the stored
+  // offsets decide which one the reviewer actually highlighted.
+  const text = 'the risk register is reviewed at every meeting and the risk register is updated before the review.'
+  const phrase = 'the risk register'
+  const first = text.indexOf(phrase)
+  const second = text.indexOf(phrase, first + 1)
+  const span = spanForAnnotation(text, { quote: phrase, start: second, end: second + phrase.length })
+  assert.equal(span.start, second)
+})
+
 test('returns nothing when the passage has been rewritten', () => {
   // No anchor to paint: the caller falls back to a margin slot rather than inventing a position.
   assert.equal(locateQuote('The project remains within scope.', 'defrayal and payroll reconciliation'), null)

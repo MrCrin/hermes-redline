@@ -10,7 +10,8 @@ import { test } from 'node:test'
 import { loadPlugin } from './load-plugin.mjs'
 
 const plugin = await loadPlugin()
-const { locateQuote, stackPositions, blockMarkerTops, spanFromPoints, spanForAnnotation, washBoxes, markerGlyph, resolutionLine, mergeBoxes } = plugin
+const { locateQuote, stackPositions, blockMarkerTops, spanFromPoints, spanForAnnotation, washBoxes,
+  markerGlyph, resolutionLine, mergeBoxes, quantise, sameMarks } = plugin.internals
 
 const collapse = (text) => text.replace(/\s+/g, ' ')
 
@@ -102,17 +103,18 @@ test('a resolved thread is marked with a tick, an open one with its kind', () =>
 })
 
 test('a closed thread shows what the agent did about it', () => {
-  assert.equal(resolutionLine({ status: 'resolved', action: 'Rewrote the bullet.' }), '✓ Rewrote the bullet.')
+  assert.equal(resolutionLine({ status: 'resolved', action: 'Rewrote the bullet.' }), 'Rewrote the bullet.')
 })
 
 test('a thread closed with no agent action says who closed it', () => {
   // The pane's own resolve button closes a thread without any agent involvement, so the card has to
-  // account for that rather than showing a resolved thread with nothing to say.
-  assert.equal(resolutionLine({ status: 'resolved', closed_by: 'reviewer' }), '✓ closed in the pane')
+  // account for that rather than showing a resolved thread with nothing to say. The card header
+  // already carries the tick, so these lines do not repeat it.
+  assert.equal(resolutionLine({ status: 'resolved', closed_by: 'reviewer' }), 'closed in the pane')
 })
 
 test('a thread closed before the record existed admits only what is known', () => {
-  assert.equal(resolutionLine({ status: 'resolved' }), '✓ closed, no action recorded')
+  assert.equal(resolutionLine({ status: 'resolved' }), 'closed, no action recorded')
 })
 
 test('an open thread has no resolution line', () => {
@@ -157,6 +159,26 @@ test('offsets keep a repeated phrase on the occurrence that was selected', () =>
   const second = text.indexOf(phrase, first + 1)
   const span = spanForAnnotation(text, { quote: phrase, start: second, end: second + phrase.length })
   assert.equal(span.start, second)
+})
+
+test('measured geometry is quantised to half pixels', () => {
+  // Raw layout values wobble by fractions between passes; storing and comparing them exactly makes the
+  // pane re-render whenever they do, and only stopping when two passes happen to be identical.
+  assert.equal(quantise(18.26), 18.5)
+  assert.equal(quantise(18.24), 18)
+  assert.equal(quantise(18), 18)
+})
+
+test('two measurement passes that agree are recognised as equal', () => {
+  const pass = { a1: { top: 18, boxes: [{ left: 0, top: 18, width: 10, height: 10 }] } }
+  assert.equal(sameMarks(pass, { a1: { top: 18, boxes: [{ left: 0, top: 18, width: 10, height: 10 }] } }), true)
+})
+
+test('a changed measurement is not mistaken for the same one', () => {
+  const pass = { a1: { top: 18, boxes: [{ left: 0, top: 18, width: 10, height: 10 }] } }
+  assert.equal(sameMarks(pass, { a1: { top: 24, boxes: [{ left: 0, top: 24, width: 10, height: 10 }] } }), false)
+  assert.equal(sameMarks(pass, {}), false)
+  assert.equal(sameMarks(pass, { a1: { top: 18, boxes: [] } }), false)
 })
 
 test('returns nothing when the passage has been rewritten', () => {

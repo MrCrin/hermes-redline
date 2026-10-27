@@ -29,6 +29,8 @@ const hasExt = (path, extensions) => extensions.some((extension) => path.toLower
 // absolute offset, so with several threads on a paragraph only the last marker was clickable and the
 // earlier ones could not be reopened, sent, resolved or removed.
 const MARKER_TOP = 2
+// Marker geometry. MARKER_SIZE is the marker box in the stylesheet below (.rl-marker width and height):
+// change one and the stacking step that keeps markers from overlapping has to change with it.
 const MARKER_SIZE = 20
 const MARKER_STEP = MARKER_SIZE + 2
 
@@ -65,6 +67,9 @@ function collapse(text) {
 // that starts early, such as a selection that ran on into the next paragraph.
 const HEAD_FALLBACKS = [40, 24, 16, 12]
 
+// The pure helpers and the DOM walk are gathered into `internals` at the foot of this file, which is the
+// one seam the test suite (tests/) reaches them through. Not an API.
+
 /**
  * Where a stored quote sits in the rendered text of its block, as raw `[start, end)` offsets.
  *
@@ -73,7 +78,7 @@ const HEAD_FALLBACKS = [40, 24, 16, 12]
  * the quote that is still present anchors the passage. Null when nothing matches: the caller falls
  * back to a free margin slot rather than pointing at the wrong words.
  */
-export function locateQuote(text, quote) {
+function locateQuote(text, quote) {
   const needle = collapse(String(quote == null ? '' : quote)).out.trim()
   if (!text || !needle) return null
   const { out, map } = collapse(text)
@@ -93,7 +98,7 @@ export function locateQuote(text, quote) {
  * plus an offset inside that node; anything past the last node clamps to the end of the block, which
  * is what a selection that ran on into the next paragraph produces.
  */
-export function spanFromPoints(lengths, start, end) {
+function spanFromPoints(lengths, start, end) {
   const total = lengths.reduce((sum, length) => sum + length, 0)
   const offsetAt = (point) => {
     if (point.index >= lengths.length) return total
@@ -113,8 +118,8 @@ export function spanFromPoints(lengths, start, end) {
  * Otherwise the quote is matched, which is also the path for sidecars written before offsets existed
  * and for annotations whose paragraph has since been edited above them.
  */
-export function spanForAnnotation(text, a) {
-  const quote = collapse(a && a.quote == null ? '' : a.quote).out.trim()
+function spanForAnnotation(text, a) {
+  const quote = collapse(String((a && a.quote) || '')).out.trim()
   const start = a && a.start
   const end = a && a.end
   if (Number.isInteger(start) && Number.isInteger(end) && start >= 0 && end > start && end <= text.length) {
@@ -124,7 +129,7 @@ export function spanForAnnotation(text, a) {
 }
 
 /** Keep markers that want the same row apart, in span order, without moving those that clear. */
-export function stackPositions(tops, step = MARKER_STEP) {
+function stackPositions(tops, step = MARKER_STEP) {
   const placed = tops.map((top, index) => ({ top, index })).sort((a, b) => a.top - b.top)
   let previous = null
   placed.forEach((marker) => {
@@ -145,7 +150,7 @@ export function stackPositions(tops, step = MARKER_STEP) {
  * and a link arrives as several boxes of differing heights that overlap by a pixel or two. Painting
  * them all double-tints the text where they stack. Boxes sharing a line become that line's bar.
  */
-export function mergeBoxes(boxes) {
+function mergeBoxes(boxes) {
   const rows = []
   ;[...boxes].sort((a, b) => a.top - b.top || a.left - b.left).forEach((box) => {
     const row = rows.find((candidate) => {
@@ -166,31 +171,56 @@ export function mergeBoxes(boxes) {
   return rows
 }
 
+/** Round measured geometry to half pixels before it is stored or compared. */
+function quantise(value) {
+  return Math.round(value * 2) / 2
+}
+
+/**
+ * Whether two measurement passes agree, so the pane can skip a state update. Raw layout values wobble
+ * by fractions between passes, and comparing them exactly re-renders the pane whenever they do.
+ */
+function sameMarks(next, previous) {
+  const ids = Object.keys(next)
+  if (ids.length !== Object.keys(previous).length) return false
+  return ids.every((id) => {
+    const fresh = next[id]
+    const old = previous[id]
+    if (!old || fresh.top !== old.top || fresh.boxes.length !== old.boxes.length) return false
+    return fresh.boxes.every((box, index) => {
+      const before = old.boxes[index]
+      return box.left === before.left && box.top === before.top
+        && box.width === before.width && box.height === before.height
+    })
+  })
+}
+
 /** The wash boxes to paint for a thread: review work only, never over a resolved passage. */
-export function washBoxes(a, mark) {
+function washBoxes(a, mark) {
   if (!mark || a.status === 'resolved') return []
   return mark.boxes
 }
 
 /** The margin glyph: the kind while a thread needs attention, a tick once it is resolved. */
-export function markerGlyph(a) {
+function markerGlyph(a) {
   return a.status === 'resolved' ? '✓' : (KINDS[a.kind] || KINDS.comment).short
 }
 
 /**
  * What a card says about a closed thread: the agent's account of what it did, or who closed it when
  * there is none to give. The pane's own resolve button closes a thread with no agent involvement, so
- * a resolved card with nothing to report has to say so instead of looking broken.
+ * a resolved card with nothing to report has to say so instead of looking broken. The card header
+ * already carries the tick, so these lines stay plain text.
  */
-export function resolutionLine(a) {
+function resolutionLine(a) {
   if (!a || a.status !== 'resolved') return null
-  if (a.action) return `✓ ${a.action}`
-  if (a.closed_by === 'reviewer') return '✓ closed in the pane'
-  return '✓ closed, no action recorded'
+  if (a.action) return a.action
+  if (a.closed_by === 'reviewer') return 'closed in the pane'
+  return 'closed, no action recorded'
 }
 
 /** Where each marker on a block goes: beside its located span, else in the next free slot. */
-export function blockMarkerTops(blockItems, marks, step = MARKER_STEP) {
+function blockMarkerTops(blockItems, marks, step = MARKER_STEP) {
   let fallback = 0
   const desired = blockItems.map((a) => {
     const mark = marks && marks[a.id]
@@ -237,7 +267,7 @@ function textPoint(container, offset) {
  * DOM, instead of being sliced out of the Markdown source (which carried markup the document never
  * renders and silently truncated long selections).
  */
-export function selectionSpan(blockEl, range) {
+function selectionSpan(blockEl, range) {
   const nodes = textNodesOf(blockEl)
   if (!nodes.length) return null
   const startPoint = textPoint(range.startContainer, range.startOffset)
@@ -475,21 +505,21 @@ function RedlinePane({ ctx, file }) {
       const boxes = Array.from(range.getClientRects())
         .filter((rect) => rect.width > 0 && rect.height > 0)
         .map((rect) => ({
-          left: rect.left - blockRect.left,
-          top: rect.top - blockRect.top,
-          width: rect.width,
-          height: rect.height,
+          left: quantise(rect.left - blockRect.left),
+          top: quantise(rect.top - blockRect.top),
+          width: quantise(rect.width),
+          height: quantise(rect.height),
         }))
       const rows = mergeBoxes(boxes)
       if (!rows.length) return
-      next[a.id] = { top: rows[0].top - 1, boxes: rows }
+      next[a.id] = { top: quantise(rows[0].top - 1), boxes: rows }
     })
     return next
   }
   measureRef.current = measure
   useEffect(() => {
     const next = measureRef.current()
-    if (JSON.stringify(next) !== JSON.stringify(marks)) setMarks(next)
+    if (!sameMarks(next, marks)) setMarks(next)
   })
   useEffect(() => {
     const remeasure = () => setMarks(measureRef.current())
@@ -672,6 +702,16 @@ function Chip() {
     className: 'rl-chip', title: 'open redline annotations',
     children: [jsx(Codicon, { name: 'tag', className: 'text-(--ui-accent)' }), jsx('b', { children: String(n) })],
   })
+}
+
+/**
+ * Test seam. The suite in tests/ loads this file the way the Desktop runtime loader does, with SDK and
+ * react stubs, and needs these to reach them from plain node. Not an API: the pane is the only
+ * production consumer.
+ */
+export const internals = {
+  locateQuote, spanFromPoints, spanForAnnotation, stackPositions, mergeBoxes, quantise, sameMarks,
+  washBoxes, markerGlyph, resolutionLine, blockMarkerTops, textNodesOf, selectionSpan, rangeIn,
 }
 
 export default {

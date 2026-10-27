@@ -86,6 +86,11 @@ const style = document.createElement('style')
 style.textContent = css
 document.head.appendChild(style)
 
+// The pane's own DOM walk and range builder, so this probe measures the code that ships rather than a
+// copy of it.
+const { locateQuote, mergeBoxes, washBoxes, blockMarkerTops, markerGlyph, selectionSpan,
+  textNodesOf, rangeIn } = plugin.internals
+
 const kindVars = () => {
   const out = {}
   for (const [kind, spec] of Object.entries(KINDS)) {
@@ -94,28 +99,6 @@ const kindVars = () => {
   return out
 }
 const VARS = kindVars()
-
-function textNodesOf(el, out = []) {
-  el.childNodes.forEach((node) => {
-    if (node.nodeType === 3) out.push(node)
-    else if (node.nodeType === 1 && !node.classList.contains('rl-hl') && !node.classList.contains('rl-marker')) textNodesOf(node, out)
-  })
-  return out
-}
-
-function rangeIn(el, span) {
-  const nodes = textNodesOf(el)
-  const range = document.createRange()
-  let at = 0
-  let started = false
-  for (const node of nodes) {
-    const length = node.nodeValue.length
-    if (!started && at + length > span.start) { range.setStart(node, span.start - at); started = true }
-    if (started && at + length >= span.end) { range.setEnd(node, span.end - at); return range }
-    at += length
-  }
-  return null
-}
 
 const doc = document.getElementById('doc')
 BLOCKS.forEach((html, index) => {
@@ -136,7 +119,7 @@ const marks = {}
 for (const a of ANNOTATIONS) {
   const block = doc.querySelector(`[data-rl-block="${a.block}"]`)
   const text = textNodesOf(block).map((node) => node.nodeValue).join('')
-  const span = plugin.locateQuote(text, a.quote)
+  const span = locateQuote(text, a.quote)
   const row = { id: a.id, block: a.block, located: !!span, quote: a.quote }
   if (span) {
     const range = rangeIn(block, span)
@@ -146,7 +129,7 @@ for (const a of ANNOTATIONS) {
       .map((rect) => ({ left: rect.left - blockRect.left, top: rect.top - blockRect.top, width: rect.width, height: rect.height }))
     row.covers = text.slice(span.start, span.end)
     row.rawRects = boxes.length
-    const bars = plugin.mergeBoxes(boxes)
+    const bars = mergeBoxes(boxes)
     row.mergedBars = bars.length
     row.maxBarOverlap = bars.reduce((worst, bar, index) => bars.slice(index + 1).reduce(
       (inner, other) => Math.max(inner, Math.min(bar.top + bar.height, other.top + other.height) - Math.max(bar.top, other.top)),
@@ -154,12 +137,12 @@ for (const a of ANNOTATIONS) {
     ), 0)
     row.firstTop = bars.length ? Number(bars[0].top.toFixed(2)) : null
     const wash = block.querySelector('.rl-hl')
-    for (const box of plugin.washBoxes(a, { boxes: bars })) {
+    for (const box of washBoxes(a, { boxes: bars })) {
       const bar = document.createElement('i')
       bar.style.cssText = `left:${box.left}px;top:${box.top}px;width:${box.width}px;height:${box.height}px;--rl-line:${VARS[a.kind].line};--rl-soft:${VARS[a.kind].soft}`
       wash.appendChild(bar)
     }
-    row.painted = plugin.washBoxes(a, { boxes: bars }).length
+    row.painted = washBoxes(a, { boxes: bars }).length
     marks[a.id] = { top: bars[0].top - 1 }
     row.top = Number((bars[0].top - 1).toFixed(2))
   } else {
@@ -171,14 +154,14 @@ for (const a of ANNOTATIONS) {
 for (let index = 0; index < BLOCKS.length; index += 1) {
   const block = doc.querySelector(`[data-rl-block="${index}"]`)
   const blockRows = rows.filter((row) => row.block === index)
-  const tops = plugin.blockMarkerTops(blockRows, marks, 22)
+  const tops = blockMarkerTops(blockRows, marks, 22)
   tops.forEach((marker) => {
     const a = ANNOTATIONS.find((x) => x.id === marker.id)
     const button = document.createElement('button')
     button.type = 'button'
     button.className = 'rl-marker'
     button.title = a.quote
-    button.textContent = plugin.markerGlyph(a)
+    button.textContent = markerGlyph(a)
     button.dataset.id = marker.id
     button.style.cssText = `top:${marker.top}px;--rl-line:${VARS[a.kind].line};--rl-soft:${VARS[a.kind].soft}`
     block.appendChild(button)
@@ -201,7 +184,7 @@ const selection = window.getSelection()
 
 const capture = (startNode, startOffset, endNode, endOffset) => {
   selection.setBaseAndExtent(startNode, startOffset, endNode, endOffset)
-  const span = plugin.selectionSpan(blockOne, selection.getRangeAt(0))
+  const span = selectionSpan(blockOne, selection.getRangeAt(0))
   return span ? blockOneText.slice(span.start, span.end) : null
 }
 

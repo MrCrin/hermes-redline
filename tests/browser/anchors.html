@@ -48,6 +48,7 @@ const BLOCKS = [
   '<p>The project remains within scope and the milestones are on track.</p>',
   '<p>Review meetings should allow <strong>sufficient time</strong> for a meaningful discussion of project progress and next steps.</p>',
   '<p>Financial forecast: spend is 12% under forecast for the period, driven by later recruitment.</p>',
+  '<p>Reviewing a claim means checking the <strong>evidence</strong> behind each <em>named cost</em>, then reconciling it against the <a href="#">defrayal rules</a> that apply to the period.</p>',
 ]
 const ANNOTATIONS = [
   { id: 'a1', kind: 'comment', block: 1, quote: 'sufficient time for a meaningful discussion' },
@@ -57,6 +58,7 @@ const ANNOTATIONS = [
   { id: 'a5', kind: 'comment', block: 0, quote: 'within scope **and** the milestones' },
   { id: 'a6', kind: 'comment', block: 2, quote: 'driven by later recruitment', status: 'resolved',
     action: 'Softened the forecast note and moved the recruitment detail into the risk register.' },
+  { id: 'a7', kind: 'comment', block: 3, quote: 'Reviewing a claim means checking the evidence behind each named cost, then reconciling it against the defrayal rules that apply to the period.' },
 ]
 
 const STUBS = {
@@ -143,17 +145,23 @@ for (const a of ANNOTATIONS) {
       .filter((rect) => rect.width > 0 && rect.height > 0)
       .map((rect) => ({ left: rect.left - blockRect.left, top: rect.top - blockRect.top, width: rect.width, height: rect.height }))
     row.covers = text.slice(span.start, span.end)
-    row.boxes = boxes.length
-    row.firstTop = boxes.length ? Number(boxes[0].top.toFixed(2)) : null
+    row.rawRects = boxes.length
+    const bars = plugin.mergeBoxes(boxes)
+    row.mergedBars = bars.length
+    row.maxBarOverlap = bars.reduce((worst, bar, index) => bars.slice(index + 1).reduce(
+      (inner, other) => Math.max(inner, Math.min(bar.top + bar.height, other.top + other.height) - Math.max(bar.top, other.top)),
+      worst,
+    ), 0)
+    row.firstTop = bars.length ? Number(bars[0].top.toFixed(2)) : null
     const wash = block.querySelector('.rl-hl')
-    for (const box of plugin.washBoxes(a, { boxes })) {
+    for (const box of plugin.washBoxes(a, { boxes: bars })) {
       const bar = document.createElement('i')
       bar.style.cssText = `left:${box.left}px;top:${box.top}px;width:${box.width}px;height:${box.height}px;--rl-line:${VARS[a.kind].line};--rl-soft:${VARS[a.kind].soft}`
       wash.appendChild(bar)
     }
-    row.painted = plugin.washBoxes(a, { boxes }).length
-    marks[a.id] = { top: boxes[0].top - 1 }
-    row.top = Number((boxes[0].top - 1).toFixed(2))
+    row.painted = plugin.washBoxes(a, { boxes: bars }).length
+    marks[a.id] = { top: bars[0].top - 1 }
+    row.top = Number((bars[0].top - 1).toFixed(2))
   } else {
     row.top = 2
   }

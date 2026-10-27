@@ -138,6 +138,34 @@ export function stackPositions(tops, step = MARKER_STEP) {
   return out
 }
 
+/**
+ * Merge one selection's rects into a single bar per rendered line.
+ *
+ * `range.getClientRects()` returns a rect for every inline run, so a selection crossing bold, italic
+ * and a link arrives as several boxes of differing heights that overlap by a pixel or two. Painting
+ * them all double-tints the text where they stack. Boxes sharing a line become that line's bar.
+ */
+export function mergeBoxes(boxes) {
+  const rows = []
+  ;[...boxes].sort((a, b) => a.top - b.top || a.left - b.left).forEach((box) => {
+    const row = rows.find((candidate) => {
+      const overlap = Math.min(candidate.top + candidate.height, box.top + box.height) - Math.max(candidate.top, box.top)
+      return overlap > Math.min(candidate.height, box.height) / 2
+    })
+    if (!row) {
+      rows.push({ ...box })
+      return
+    }
+    const right = Math.max(row.left + row.width, box.left + box.width)
+    const bottom = Math.max(row.top + row.height, box.top + box.height)
+    row.left = Math.min(row.left, box.left)
+    row.top = Math.min(row.top, box.top)
+    row.width = right - row.left
+    row.height = bottom - row.top
+  })
+  return rows
+}
+
 /** The wash boxes to paint for a thread: review work only, never over a resolved passage. */
 export function washBoxes(a, mark) {
   if (!mark || a.status === 'resolved') return []
@@ -452,8 +480,9 @@ function RedlinePane({ ctx, file }) {
           width: rect.width,
           height: rect.height,
         }))
-      if (!boxes.length) return
-      next[a.id] = { top: boxes[0].top - 1, boxes }
+      const rows = mergeBoxes(boxes)
+      if (!rows.length) return
+      next[a.id] = { top: rows[0].top - 1, boxes: rows }
     })
     return next
   }

@@ -10,7 +10,7 @@ import { test } from 'node:test'
 import { loadPlugin } from './load-plugin.mjs'
 
 const plugin = await loadPlugin()
-const { locateQuote, stackPositions, blockMarkerTops, spanFromPoints, spanForAnnotation, washBoxes, markerGlyph, resolutionLine } = plugin
+const { locateQuote, stackPositions, blockMarkerTops, spanFromPoints, spanForAnnotation, washBoxes, markerGlyph, resolutionLine, mergeBoxes } = plugin
 
 const collapse = (text) => text.replace(/\s+/g, ' ')
 
@@ -118,6 +118,34 @@ test('a thread closed before the record existed admits only what is known', () =
 test('an open thread has no resolution line', () => {
   assert.equal(resolutionLine({ status: 'open' }), null)
   assert.equal(resolutionLine({ status: 'sent' }), null)
+})
+
+test('rects from one rendered line merge into a single bar', () => {
+  // A selection crossing bold, italic and a link comes back as one rect per inline run, with
+  // different heights and slight overlaps, which double-tints the text where they stack.
+  const boxes = [
+    { left: 0, top: 10, width: 60, height: 20 },
+    { left: 58, top: 8, width: 40, height: 24 },
+    { left: 96, top: 10, width: 30, height: 20 },
+  ]
+  assert.deepEqual(mergeBoxes(boxes), [{ left: 0, top: 8, width: 126, height: 24 }])
+})
+
+test('rects on separate rendered lines stay separate', () => {
+  const boxes = [
+    { left: 0, top: 10, width: 600, height: 20 },
+    { left: 0, top: 40, width: 200, height: 20 },
+  ]
+  assert.deepEqual(mergeBoxes(boxes), boxes)
+})
+
+test('a single rect is left alone, and unsorted input still merges', () => {
+  assert.deepEqual(mergeBoxes([{ left: 5, top: 10, width: 10, height: 20 }]), [{ left: 5, top: 10, width: 10, height: 20 }])
+  const sorted = mergeBoxes([
+    { left: 96, top: 10, width: 30, height: 20 },
+    { left: 0, top: 10, width: 60, height: 20 },
+  ])
+  assert.deepEqual(sorted, [{ left: 0, top: 10, width: 126, height: 20 }])
 })
 
 test('returns nothing when the passage has been rewritten', () => {

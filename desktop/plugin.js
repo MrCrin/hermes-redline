@@ -23,6 +23,236 @@ const CODE_EXT = ['.py', '.sh', '.js', '.ts', '.tsx', '.c', '.h', '.cpp', '.go',
   '.yaml', '.yml', '.json', '.toml', '.sql']
 const hasExt = (path, extensions) => extensions.some((extension) => path.toLowerCase().endsWith(extension))
 
+// Every annotation stores the text it was made on. That quote is located inside the rendered block,
+// painted as a wash behind those words, and the margin marker is placed against it, so a thread
+// visibly belongs to its passage instead of to the paragraph as a whole. Both used to render at one
+// absolute offset, so with several threads on a paragraph only the last marker was clickable and the
+// earlier ones could not be reopened, sent, resolved or removed.
+const MARKER_TOP = 2
+const MARKER_SIZE = 20
+const MARKER_STEP = MARKER_SIZE + 2
+
+/** Fallback row for a thread whose span cannot be located: the nth free slot on the block. */
+function slotTop(index) {
+  return MARKER_TOP + index * MARKER_STEP
+}
+
+/** Keep the open card inside the pane while it follows its own marker's row. */
+function clampToPane(top, paneHeight, cardHeight = 120) {
+  return Math.max(4, Math.min(top, paneHeight - cardHeight))
+}
+
+/** Collapse runs of whitespace to one space, keeping a map back to the raw offsets. */
+function collapse(text) {
+  let out = ''
+  const map = []
+  for (let at = 0; at < text.length; at += 1) {
+    if (/\s/.test(text[at])) {
+      if (out && out[out.length - 1] !== ' ') {
+        out += ' '
+        map.push(at)
+      }
+      continue
+    }
+    out += text[at]
+    map.push(at)
+  }
+  return { out, map }
+}
+
+// Prefix lengths tried when the stored quote is not in the rendered text verbatim. Long first, so the
+// wash stays as close to the real selection as the text allows; short enough to survive a divergence
+// that starts early, such as a selection that ran on into the next paragraph.
+const HEAD_FALLBACKS = [40, 24, 16, 12]
+
+/**
+ * Where a stored quote sits in the rendered text of its block, as raw `[start, end)` offsets.
+ *
+ * A browser selection and the rendered text agree once whitespace is collapsed (a selection that
+ * wrapped across rendered lines carries the break with it). When they do not, the longest prefix of
+ * the quote that is still present anchors the passage. Null when nothing matches: the caller falls
+ * back to a free margin slot rather than pointing at the wrong words.
+ */
+export function locateQuote(text, quote) {
+  const needle = collapse(String(quote == null ? '' : quote)).out.trim()
+  if (!text || !needle) return null
+  const { out, map } = collapse(text)
+  const span = (at, length) => ({ start: map[at], end: map[at + length - 1] + 1 })
+  const exact = out.indexOf(needle)
+  if (exact >= 0) return span(exact, needle.length)
+  for (const length of HEAD_FALLBACKS) {
+    if (length >= needle.length) continue
+    const at = out.indexOf(needle.slice(0, length))
+    if (at >= 0) return span(at, length)
+  }
+  return null
+}
+
+/**
+ * Turn a selection's endpoints into offsets in a block's rendered text. An endpoint is a node index
+ * plus an offset inside that node; anything past the last node clamps to the end of the block, which
+ * is what a selection that ran on into the next paragraph produces.
+ */
+export function spanFromPoints(lengths, start, end) {
+  const total = lengths.reduce((sum, length) => sum + length, 0)
+  const offsetAt = (point) => {
+    if (point.index >= lengths.length) return total
+    let at = 0
+    for (let index = 0; index < point.index; index += 1) at += lengths[index]
+    return at + Math.min(point.offset, lengths[point.index])
+  }
+  const from = offsetAt(start)
+  const to = offsetAt(end)
+  return to > from ? { start: from, end: to } : null
+}
+
+/**
+ * Where an annotation's span starts and ends in the rendered text of its block.
+ *
+ * Offsets recorded at selection time win when the text they point at is still the quoted passage.
+ * Otherwise the quote is matched, which is also the path for sidecars written before offsets existed
+ * and for annotations whose paragraph has since been edited above them.
+ */
+export function spanForAnnotation(text, a) {
+  const quote = collapse(a && a.quote == null ? '' : a.quote).out.trim()
+  const start = a && a.start
+  const end = a && a.end
+  if (Number.isInteger(start) && Number.isInteger(end) && start >= 0 && end > start && end <= text.length) {
+    if (collapse(text.slice(start, end)).out.trim() === quote) return { start, end }
+  }
+  return locateQuote(text, quote)
+}
+
+/** Keep markers that want the same row apart, in span order, without moving those that clear. */
+export function stackPositions(tops, step = MARKER_STEP) {
+  const placed = tops.map((top, index) => ({ top, index })).sort((a, b) => a.top - b.top)
+  let previous = null
+  placed.forEach((marker) => {
+    marker.top = previous === null ? marker.top : Math.max(marker.top, previous + step)
+    previous = marker.top
+  })
+  const out = []
+  placed.forEach((marker) => {
+    out[marker.index] = marker.top
+  })
+  return out
+}
+
+/** The wash boxes to paint for a thread: review work only, never over a resolved passage. */
+export function washBoxes(a, mark) {
+  if (!mark || a.status === 'resolved') return []
+  return mark.boxes
+}
+
+/** The margin glyph: the kind while a thread needs attention, a tick once it is resolved. */
+export function markerGlyph(a) {
+  return a.status === 'resolved' ? '✓' : (KINDS[a.kind] || KINDS.comment).short
+}
+
+/**
+ * What a card says about a closed thread: the agent's account of what it did, or who closed it when
+ * there is none to give. The pane's own resolve button closes a thread with no agent involvement, so
+ * a resolved card with nothing to report has to say so instead of looking broken.
+ */
+export function resolutionLine(a) {
+  if (!a || a.status !== 'resolved') return null
+  if (a.action) return `✓ ${a.action}`
+  if (a.closed_by === 'reviewer') return '✓ closed in the pane'
+  return '✓ closed, no action recorded'
+}
+
+/** Where each marker on a block goes: beside its located span, else in the next free slot. */
+export function blockMarkerTops(blockItems, marks, step = MARKER_STEP) {
+  let fallback = 0
+  const desired = blockItems.map((a) => {
+    const mark = marks && marks[a.id]
+    return mark && Number.isFinite(mark.top) ? mark.top : slotTop(fallback++)
+  })
+  const tops = stackPositions(desired, step)
+  return blockItems.map((a, index) => ({ id: a.id, top: tops[index] }))
+}
+
+/** Text nodes under a node, in DOM order, ignoring the pane's own chrome (markers, highlight wash). */
+function textNodesOf(el, out = []) {
+  el.childNodes.forEach((node) => {
+    if (node.nodeType === 3) {
+      out.push(node)
+    } else if (node.nodeType === 1 && !node.classList.contains('rl-hl') && !node.classList.contains('rl-marker')) {
+      textNodesOf(node, out)
+    }
+  })
+  return out
+}
+
+/** Text nodes under a node, counting the node itself when it is one. */
+function textUnder(node) {
+  return node.nodeType === 3 ? [node] : textNodesOf(node)
+}
+
+/** A range endpoint as a text node plus an offset inside it. */
+function textPoint(container, offset) {
+  if (container.nodeType === 3) return { node: container, offset }
+  const children = Array.from(container.childNodes)
+  const before = children.slice(0, offset).flatMap((child) => textUnder(child))
+  if (before.length) {
+    const last = before[before.length - 1]
+    return { node: last, offset: last.nodeValue.length }
+  }
+  const after = children.slice(offset).flatMap((child) => textUnder(child))
+  return after.length ? { node: after[0], offset: 0 } : null
+}
+
+/**
+ * The live selection as offsets in its block's rendered text, clamped to that block.
+ *
+ * This is what makes the wash match the highlight: the selection is measured where it exists, in the
+ * DOM, instead of being sliced out of the Markdown source (which carried markup the document never
+ * renders and silently truncated long selections).
+ */
+export function selectionSpan(blockEl, range) {
+  const nodes = textNodesOf(blockEl)
+  if (!nodes.length) return null
+  const startPoint = textPoint(range.startContainer, range.startOffset)
+  const last = nodes[nodes.length - 1]
+  const endPoint = blockEl.contains(range.endContainer)
+    ? textPoint(range.endContainer, range.endOffset)
+    : { node: last, offset: last.nodeValue.length }
+  if (!startPoint || !endPoint) return null
+  return spanFromPoints(
+    nodes.map((node) => node.nodeValue.length),
+    { index: nodes.indexOf(startPoint.node), offset: startPoint.offset },
+    { index: nodes.indexOf(endPoint.node), offset: endPoint.offset },
+  )
+}
+
+/** Turn raw offsets into a DOM range so the browser can measure and paint that span. */
+function rangeIn(el, span) {
+  const nodes = textNodesOf(el)
+  const range = document.createRange()
+  let at = 0
+  let started = false
+  for (const node of nodes) {
+    const length = node.nodeValue.length
+    if (!started && at + length > span.start) {
+      range.setStart(node, span.start - at)
+      started = true
+    }
+    if (started && at + length >= span.end) {
+      range.setEnd(node, span.end - at)
+      return range
+    }
+    at += length
+  }
+  return null
+}
+
+/** The rendered text of a block, in the same order rangeIn walks it. */
+function blockText(el) {
+  return textNodesOf(el)
+    .map((node) => node.nodeValue)
+    .join('')
+}
+
 const CSS = `
 .rl-root{position:relative;height:100%;display:flex;flex-direction:column;padding:18px 22px;
   --rl-comment:var(--ui-accent);--rl-question:var(--ui-purple);--rl-change:var(--ui-orange);
@@ -34,7 +264,7 @@ const CSS = `
 .rl-path{font-size:11px;color:var(--ui-text-tertiary);max-width:34ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rl-main{flex:1;min-height:0;position:relative;margin-top:14px}
 .rl-doc{height:100%;overflow:auto;padding-right:34px;max-width:720px;line-height:1.7;-webkit-user-select:text;user-select:text}
-.rl-doc [data-rl-block]{position:relative;padding:2px 4px;border-radius:6px}
+.rl-doc [data-rl-block]{position:relative;isolation:isolate;padding:2px 4px;border-radius:6px}
 .rl-doc h1,.rl-doc h2,.rl-doc h3{font-weight:600;letter-spacing:-.01em;margin:14px 0 6px}
 .rl-doc h1{font-size:17px}.rl-doc h2{font-size:15px}.rl-doc h3{font-size:13.5px}
 .rl-doc ul,.rl-doc ol{padding-left:22px;margin:6px 0}
@@ -60,6 +290,10 @@ const CSS = `
 .rl-asterisk{color:var(--ui-red);font-weight:700;font-size:15px;line-height:1}
 .rl-doc mark{background:var(--rl-soft);color:inherit;border-radius:3px;padding:1px 2px;box-shadow:inset 0 -1px 0 var(--rl-line)}
 .rl-doc mark.rl-sent{opacity:.45}
+.rl-hl{position:absolute;inset:0;z-index:-1;pointer-events:none}
+.rl-hl i{position:absolute;border-radius:3px;background:var(--rl-soft);box-shadow:inset 0 -1px 0 var(--rl-line)}
+.rl-hl i.sent{opacity:.45}
+.rl-hl i.done{opacity:.4}
 .rl-marker{position:absolute;right:-26px;top:2px;width:20px;height:20px;border-radius:6px;border:1px solid var(--rl-line);background:var(--rl-soft);color:var(--rl-line);font-size:11px;line-height:1;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center}
 .rl-marker:hover{background:color-mix(in oklab,var(--rl-line) 30%,transparent)}
 .rl-marker.done{opacity:.4}
@@ -69,6 +303,8 @@ const CSS = `
 .rl-kind{display:flex;align-items:center;gap:6px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--rl-line)}
 .rl-quote{font-size:12px;color:var(--ui-text-tertiary);border-left:2px solid var(--ui-stroke-secondary);padding-left:8px;margin:6px 0;font-style:italic;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
 .rl-note{font-size:13px;line-height:1.55}
+.rl-action{font-size:12.5px;line-height:1.5;color:var(--ui-text-secondary);margin-top:7px;padding-left:8px;border-left:2px solid var(--rl-line)}
+.rl-action.quiet{color:var(--ui-text-tertiary);border-left-color:var(--ui-stroke-secondary)}
 .rl-foot{display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:11px;color:var(--ui-text-tertiary)}
 .rl-mini{border:0;background:none;color:var(--ui-text-tertiary);cursor:pointer;font-size:11px;padding:0}
 .rl-mini:hover{color:var(--ui-text-primary)}
@@ -100,15 +336,6 @@ function tokensToLines(tokens) {
   return lines
 }
 
-function blockQuote(block, sel) {
-  const i = block.indexOf(sel)
-  if (i >= 0) return sel
-  const head = sel.slice(0, 40)
-  const j = head.length > 12 ? block.indexOf(head) : -1
-  if (j >= 0) return block.slice(j, j + Math.max(sel.length, head.length))
-  return sel.slice(0, 160)
-}
-
 export function buildBatchMessage(path, items) {
   const head = `⁂ redline — review of ${path} (${items.length} notes). Change requests: edit ${path} in place — do not create a new copy or file.`
   const body = items.map((a, i) => {
@@ -126,6 +353,7 @@ function KindIcon({ kind }) {
 
 function Card({ a, draftText, onDraftText, onSaveDraft, onSend, onCancelDraft, onToggle, onRemove, onClose }) {
   const k = KINDS[a.kind] || KINDS.comment
+  const resolution = resolutionLine(a)
   if (a.draft) {
     return jsxs('div', { className: 'rl-float', style: { '--rl-line': `var(${k.var})`, '--rl-soft': `var(${k.var}-soft)` }, children: [
       jsxs('div', { className: 'rl-kind', children: [jsx(KindIcon, { kind: a.kind }), k.label] }),
@@ -152,6 +380,7 @@ function Card({ a, draftText, onDraftText, onSaveDraft, onSend, onCancelDraft, o
     ] }),
     jsx('div', { className: 'rl-quote', children: a.quote }),
     jsx('div', { className: 'rl-note', children: a.note }),
+    resolution ? jsx('div', { className: `rl-action${a.action ? '' : ' quiet'}`, children: resolution }) : null,
     jsxs('div', { className: 'rl-foot', children: [
       jsx('button', { type: 'button', className: 'rl-mini', onClick: () => onRemove(a.id), children: 'remove' }),
       jsxs('span', { style: { display: 'flex', gap: 6, alignItems: 'center' }, children: [
@@ -168,6 +397,8 @@ function RedlinePane({ ctx, file }) {
   const [draftText, setDraftText] = useState('')
   const [pill, setPill] = useState(null)
   const [shown, setShown] = useState(null)
+  const [marks, setMarks] = useState({})
+  const measureRef = useRef(null)
   const docRef = useRef(null)
   const mainRef = useRef(null)
 
@@ -198,6 +429,45 @@ function RedlinePane({ ctx, file }) {
 
   useEffect(() => { if (file) { setActive(file); setPath(file) } }, [file])
 
+  // Threads are anchored to the rendered text, because the pane renders Markdown: the stored quote has
+  // to be located in the DOM, not in the source. Measured after each render (the pane polls every 3s,
+  // so agent edits flow through) and on resize. The wash and the margin markers read the result.
+  const measure = () => {
+    const doc = docRef.current
+    if (!doc) return {}
+    const next = {}
+    items.forEach((a) => {
+      const blockEl = doc.querySelector(`[data-rl-block="${a.block}"]`)
+      if (!blockEl) return
+      const span = spanForAnnotation(blockText(blockEl), a)
+      if (!span) return
+      const range = rangeIn(blockEl, span)
+      if (!range) return
+      const blockRect = blockEl.getBoundingClientRect()
+      const boxes = Array.from(range.getClientRects())
+        .filter((rect) => rect.width > 0 && rect.height > 0)
+        .map((rect) => ({
+          left: rect.left - blockRect.left,
+          top: rect.top - blockRect.top,
+          width: rect.width,
+          height: rect.height,
+        }))
+      if (!boxes.length) return
+      next[a.id] = { top: boxes[0].top - 1, boxes }
+    })
+    return next
+  }
+  measureRef.current = measure
+  useEffect(() => {
+    const next = measureRef.current()
+    if (JSON.stringify(next) !== JSON.stringify(marks)) setMarks(next)
+  })
+  useEffect(() => {
+    const remeasure = () => setMarks(measureRef.current())
+    window.addEventListener('resize', remeasure)
+    return () => window.removeEventListener('resize', remeasure)
+  }, [])
+
   const save = (next) => {
     ctx.rest('/annotations', { method: 'POST', body: { path: active, items: next } })
       .then(() => {
@@ -213,23 +483,37 @@ function RedlinePane({ ctx, file }) {
     save([...items.filter((x) => x.id !== id), { ...a, note: note.trim(), draft: undefined, status: 'open' }])
     setDraftText('')
   }
-  const toggle = (id) => save(items.map((a) => (a.id === id ? { ...a, status: a.status === 'resolved' ? 'open' : 'resolved' } : a)))
+  const toggle = (id) => save(items.map((a) => {
+    if (a.id !== id) return a
+    // Resolving here is the reviewer closing a thread; the agent's action line is separate, so record
+    // who closed it and clear the record if it is reopened.
+    return a.status === 'resolved'
+      ? { ...a, status: 'open', closed_by: undefined }
+      : { ...a, status: 'resolved', closed_by: 'reviewer' }
+  }))
   const remove = (id) => save(items.filter((a) => a.id !== id))
 
   const onMouseUp = () => {
     const sel = window.getSelection()
-    const text = sel ? sel.toString().trim() : ''
-    if (!text || !mainRef.current || !docRef.current || !docRef.current.contains(sel.anchorNode)) { setPill(null); return }
-    let node = sel.anchorNode
+    const picked = sel ? sel.toString().trim() : ''
+    if (!picked || !sel.rangeCount || !mainRef.current || !docRef.current) { setPill(null); return }
+    const range = sel.getRangeAt(0)
+    if (!docRef.current.contains(range.startContainer)) { setPill(null); return }
+    let node = range.startContainer
     if (node && node.nodeType === 3) node = node.parentElement
     const blockEl = node && node.closest ? node.closest('[data-rl-block]') : null
     if (!blockEl) { setPill(null); return }
-    const idx = Number(blockEl.dataset.rlBlock)
-    const r = sel.getRangeAt(0).getBoundingClientRect()
+    const span = selectionSpan(blockEl, range)
+    if (!span) { setPill(null); return }
+    const r = range.getBoundingClientRect()
     const mb = mainRef.current.getBoundingClientRect()
     setPill({
-      block: idx,
-      quote: blockQuote(blocks[idx] || '', text),
+      block: Number(blockEl.dataset.rlBlock),
+      // The rendered text of the selection, measured in the DOM: no markdown, no truncation, and the
+      // same string the wash will paint.
+      quote: blockText(blockEl).slice(span.start, span.end).trim(),
+      start: span.start,
+      end: span.end,
       x: Math.max(0, Math.min(r.left - mb.left, mb.width - 260)),
       y: r.bottom - mb.top + 8,
     })
@@ -238,7 +522,7 @@ function RedlinePane({ ctx, file }) {
     if (!pill) return
     const id = `a${Date.now()}`
     const line = isCode ? pill.block + 1 : undefined
-    save([...items, { id, kind, block: pill.block, quote: pill.quote, note: '', status: 'open', draft: true, line }])
+    save([...items, { id, kind, block: pill.block, quote: pill.quote, start: pill.start, end: pill.end, note: '', status: 'open', draft: true, line }])
     setShown(id)
     setDraftText('')
     setPill(null)
@@ -291,24 +575,39 @@ function RedlinePane({ ctx, file }) {
           ? jsx('div', { className: 'rl-empty', children: 'loading…' })
           : docQ.isError
             ? jsx('div', { className: 'rl-empty', children: `could not read ${active} — check the path (the redline backend must be active)` })
-            : blocks.map((b, i) => jsxs('div', { 'data-rl-block': String(i), className: 'rl-block', children: [
+            : blocks.map((b, i) => {
+              const blockItems = items.filter((a) => a.block === i)
+              const tops = blockMarkerTops(blockItems, marks)
+              return jsxs('div', { 'data-rl-block': String(i), className: 'rl-block', children: [
+                jsx('div', { className: 'rl-hl', children: blockItems.flatMap((a) => {
+                  const k = KINDS[a.kind] || KINDS.comment
+                  return washBoxes(a, marks[a.id]).map((box, line) => jsx('i', {
+                    className: a.status === 'sent' ? 'sent' : '',
+                    style: {
+                      '--rl-line': `var(${k.var})`, '--rl-soft': `var(${k.var}-soft)`,
+                      left: box.left, top: box.top, width: box.width, height: box.height,
+                    },
+                  }, `${a.id}-${line}`))
+                }) }),
                 isCode
                   ? jsxs('div', { className: 'rl-line', children: [
                       jsx('span', { className: 'rl-ln', children: String(i + 1) }),
                       jsx('span', { className: 'rl-code', children: (tokLines && tokLines[i]) || b || ' ' }),
                     ] })
                   : jsx(MessageTextContent, { text: b, media: false }),
-                ...items.filter((a) => a.block === i).map((a) => {
+                ...blockItems.map((a) => {
                   const k = KINDS[a.kind] || KINDS.comment
+                  const row = tops.find((marker) => marker.id === a.id)
                   return jsx('button', {
                     type: 'button', className: `rl-marker${a.status === 'resolved' ? ' done' : ''}`,
-                    style: { '--rl-line': `var(${k.var})`, '--rl-soft': `var(${k.var}-soft)` },
-                    title: a.note || k.label,
+                    style: { '--rl-line': `var(${k.var})`, '--rl-soft': `var(${k.var}-soft)`, top: row ? row.top : MARKER_TOP },
+                    title: a.quote || a.note || k.label,
                     onClick: () => setShown(shown === a.id ? null : a.id),
-                    children: k.short,
+                    children: markerGlyph(a),
                   }, a.id)
                 }),
-              ] }, String(i))) || null,
+              ] }, String(i))
+            }) || null,
       }),
       shown ? (() => {
         const a = items.find((x) => x.id === shown)
@@ -316,7 +615,8 @@ function RedlinePane({ ctx, file }) {
         const blockEl = docRef.current && docRef.current.querySelector(`[data-rl-block="${a.block}"]`)
         if (!blockEl || !mainRef.current) return null
         const bb = blockEl.getBoundingClientRect(), mb = mainRef.current.getBoundingClientRect()
-        const top = Math.max(4, Math.min(bb.top - mb.top, mb.height - 120))
+        const row = blockMarkerTops(items.filter((x) => x.block === a.block), marks).find((marker) => marker.id === a.id)
+        const top = clampToPane(bb.top - mb.top + (row ? row.top : MARKER_TOP), mb.height)
         return jsx('div', { style: { position: 'absolute', top, left: '50%', width: 'min(300px, 86%)', transform: 'translateX(-50%)', zIndex: 20 }, children: jsx(Card, {
           a, draftText, onDraftText: setDraftText, onSaveDraft: addDraft, onSend: sendOne,
           onCancelDraft: () => { save(items.filter((x) => x.id !== a.id)); setShown(null) },

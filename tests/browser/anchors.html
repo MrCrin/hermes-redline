@@ -59,6 +59,9 @@ const ANNOTATIONS = [
   { id: 'a6', kind: 'comment', block: 2, quote: 'driven by later recruitment', status: 'resolved',
     action: 'Softened the forecast note and moved the recruitment detail into the risk register.' },
   { id: 'a7', kind: 'comment', block: 3, quote: 'Reviewing a claim means checking the evidence behind each named cost, then reconciling it against the defrayal rules that apply to the period.' },
+  // Recorded against the wrong block on purpose: a paragraph above it was removed, so the passage now
+  // lives three blocks later and the thread has to find it again.
+  { id: 'a8', kind: 'comment', block: 0, quote: 'Reviewing a claim means checking the evidence', start: 0, end: 49 },
 ]
 
 const STUBS = {
@@ -88,7 +91,7 @@ document.head.appendChild(style)
 
 // The pane's own DOM walk and range builder, so this probe measures the code that ships rather than a
 // copy of it.
-const { locateQuote, mergeBoxes, washBoxes, blockMarkerTops, markerGlyph, selectionSpan,
+const { mergeBoxes, washBoxes, blockMarkerTops, markerGlyph, selectionSpan, resolveBlock,
   textNodesOf, rangeIn } = plugin.internals
 
 const kindVars = () => {
@@ -116,12 +119,18 @@ BLOCKS.forEach((html, index) => {
 
 const rows = []
 const marks = {}
+const blockEls = BLOCKS.map((_, index) => doc.querySelector(`[data-rl-block="${index}"]`))
+const texts = blockEls.map((el) => textNodesOf(el).map((node) => node.nodeValue).join(''))
+
 for (const a of ANNOTATIONS) {
-  const block = doc.querySelector(`[data-rl-block="${a.block}"]`)
-  const text = textNodesOf(block).map((node) => node.nodeValue).join('')
-  const span = locateQuote(text, a.quote)
-  const row = { id: a.id, block: a.block, located: !!span, quote: a.quote }
-  if (span) {
+  const resolved = resolveBlock(texts, a.block, a)
+  const row = { id: a.id, block: a.block, located: !!resolved, quote: a.quote }
+  if (resolved) {
+    const block = blockEls[resolved.block]
+    row.resolvedBlock = resolved.block
+    row.moved = resolved.block !== a.block
+    const text = texts[resolved.block]
+    const span = resolved.span
     const range = rangeIn(block, span)
     const blockRect = block.getBoundingClientRect()
     const boxes = [...range.getClientRects()]
@@ -153,7 +162,7 @@ for (const a of ANNOTATIONS) {
 
 for (let index = 0; index < BLOCKS.length; index += 1) {
   const block = doc.querySelector(`[data-rl-block="${index}"]`)
-  const blockRows = rows.filter((row) => row.block === index)
+  const blockRows = rows.filter((row) => (row.resolvedBlock === undefined ? row.block : row.resolvedBlock) === index)
   const tops = blockMarkerTops(blockRows, marks, 22)
   tops.forEach((marker) => {
     const a = ANNOTATIONS.find((x) => x.id === marker.id)
@@ -167,7 +176,7 @@ for (let index = 0; index < BLOCKS.length; index += 1) {
     block.appendChild(button)
     marker.markerTop = Number(marker.top.toFixed(2))
   })
-  rows.filter((row) => row.block === index).forEach((row) => {
+  rows.filter((row) => (row.resolvedBlock === undefined ? row.block : row.resolvedBlock) === index).forEach((row) => {
     row.markerTop = tops.find((marker) => marker.id === row.id).markerTop
     row.aligned = row.located ? Math.abs(row.markerTop - row.top) < 1 : null
   })

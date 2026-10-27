@@ -11,7 +11,7 @@ import { loadPlugin } from './load-plugin.mjs'
 
 const plugin = await loadPlugin()
 const { locateQuote, stackPositions, blockMarkerTops, spanFromPoints, spanForAnnotation, washBoxes,
-  markerGlyph, resolutionLine, mergeBoxes, quantise, sameMarks } = plugin.internals
+  markerGlyph, resolutionLine, mergeBoxes, quantise, sameMarks, resolveBlock } = plugin.internals
 
 const collapse = (text) => text.replace(/\s+/g, ' ')
 
@@ -179,6 +179,31 @@ test('a changed measurement is not mistaken for the same one', () => {
   assert.equal(sameMarks(pass, { a1: { top: 24, boxes: [{ left: 0, top: 24, width: 10, height: 10 }] } }), false)
   assert.equal(sameMarks(pass, {}), false)
   assert.equal(sameMarks(pass, { a1: { top: 18, boxes: [] } }), false)
+})
+
+test('a passage is found in its recorded block when nothing moved', () => {
+  const texts = ['first paragraph', 'the risk register is updated before every review', 'third paragraph']
+  const resolved = resolveBlock(texts, 1, { quote: 'updated before every review', start: 17, end: 44 })
+  assert.equal(resolved.block, 1)
+  assert.equal(texts[1].slice(resolved.span.start, resolved.span.end), 'updated before every review')
+})
+
+test('a passage is found again after a paragraph above it is removed', () => {
+  // Deleting a block shifts every index after it, so the recorded block is now a different paragraph.
+  const texts = ['first paragraph', 'A line that only you will close.', 'third paragraph']
+  const resolved = resolveBlock(texts, 2, { quote: 'A line that only you will close.', start: 0, end: 32 })
+  assert.equal(resolved.block, 1, 'the thread finds its own words one block up')
+})
+
+test('the recorded block wins when the same words appear in several', () => {
+  const texts = ['the risk register is reviewed', 'something else', 'the risk register is stale']
+  const resolved = resolveBlock(texts, 2, { quote: 'the risk register' })
+  assert.equal(resolved.block, 2, 'nearest to the recorded index, not the first match in the document')
+})
+
+test('a passage that is gone from every block resolves to nothing', () => {
+  const texts = ['first paragraph', 'second paragraph']
+  assert.equal(resolveBlock(texts, 1, { quote: 'This sentence will be removed during the test.' }), null)
 })
 
 test('returns nothing when the passage has been rewritten', () => {

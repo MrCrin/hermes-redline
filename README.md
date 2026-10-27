@@ -78,6 +78,6 @@ Markdown: `.md`, `.markdown`. Source/config: `.py`, `.sh`, `.js`, `.ts`, `.tsx`,
 - A thread that has been sent but not closed keeps a faded wash, so what is still in flight stays visible while you read.
 - Anchors are matched against the rendered text, so a passage edited beyond recognition loses its wash and its marker falls back to the block margin. Selections are stored with their offsets, so a repeated phrase anchors to the occurrence you selected; where only the quote is available (older sidecars, or offsets that no longer fit the text) matching takes the first occurrence.
 - Markdown renders through the chat's own renderer — tables, lists, code blocks yes; syntax highlighting depends on the chat provider.
-- Block anchors are paragraph indices captured at annotation time; heavily rewritten documents may need a re-select.
+- Block anchors are paragraph indices captured at annotation time, so the pane looks for the passage in that block first and then outward from it. If the words themselves are gone, the thread keeps its quote and falls back to a margin slot.
 
 MIT licensed. Feedback and forks welcome.

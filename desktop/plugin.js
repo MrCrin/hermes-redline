@@ -128,6 +128,30 @@ function spanForAnnotation(text, a) {
   return locateQuote(text, quote)
 }
 
+/**
+ * Which block holds an annotation's passage, and where in it.
+ *
+ * The recorded index is a paragraph position captured when the annotation was made, so anything that
+ * adds or removes a paragraph above it shifts every later index. The recorded block is tried first,
+ * then the blocks outward from it, nearest first, so a thread finds its own words again instead of
+ * landing on whatever now occupies its old slot. Null when the passage is gone from the document.
+ */
+export function resolveBlock(texts, recorded, a) {
+  const at = (index) => {
+    const text = texts[index]
+    if (typeof text !== 'string') return null
+    const span = spanForAnnotation(text, a)
+    return span ? { block: index, span } : null
+  }
+  const own = at(recorded)
+  if (own) return own
+  for (let distance = 1; distance < texts.length; distance += 1) {
+    const found = at(recorded - distance) || at(recorded + distance)
+    if (found) return found
+  }
+  return null
+}
+
 /** Keep markers that want the same row apart, in span order, without moving those that clear. */
 function stackPositions(tops, step = MARKER_STEP) {
   const placed = tops.map((top, index) => ({ top, index })).sort((a, b) => a.top - b.top)
@@ -186,7 +210,7 @@ function sameMarks(next, previous) {
   return ids.every((id) => {
     const fresh = next[id]
     const old = previous[id]
-    if (!old || fresh.top !== old.top || fresh.boxes.length !== old.boxes.length) return false
+    if (!old || fresh.top !== old.top || fresh.block !== old.block || fresh.boxes.length !== old.boxes.length) return false
     return fresh.boxes.every((box, index) => {
       const before = old.boxes[index]
       return box.left === before.left && box.top === before.top
@@ -493,13 +517,17 @@ function RedlinePane({ ctx, file }) {
   const measure = () => {
     const doc = docRef.current
     if (!doc) return {}
+    const blockEls = Array.from(doc.querySelectorAll('[data-rl-block]'))
+    const texts = blockEls.map((el) => blockText(el))
     const next = {}
     items.forEach((a) => {
-      const blockEl = doc.querySelector(`[data-rl-block="${a.block}"]`)
+      // The block is resolved, not assumed: a paragraph added or removed above this thread shifts the
+      // recorded index, and the passage is usually still there a block or two away.
+      const resolved = resolveBlock(texts, a.block, a)
+      if (!resolved) return
+      const blockEl = blockEls[resolved.block]
       if (!blockEl) return
-      const span = spanForAnnotation(blockText(blockEl), a)
-      if (!span) return
-      const range = rangeIn(blockEl, span)
+      const range = rangeIn(blockEl, resolved.span)
       if (!range) return
       const blockRect = blockEl.getBoundingClientRect()
       const boxes = Array.from(range.getClientRects())
@@ -512,7 +540,7 @@ function RedlinePane({ ctx, file }) {
         }))
       const rows = mergeBoxes(boxes)
       if (!rows.length) return
-      next[a.id] = { top: quantise(rows[0].top - 1), boxes: rows }
+      next[a.id] = { block: resolved.block, top: quantise(rows[0].top - 1), boxes: rows }
     })
     return next
   }
@@ -635,7 +663,7 @@ function RedlinePane({ ctx, file }) {
           : docQ.isError
             ? jsx('div', { className: 'rl-empty', children: `could not read ${active} — check the path (the redline backend must be active)` })
             : blocks.map((b, i) => {
-              const blockItems = items.filter((a) => a.block === i)
+              const blockItems = items.filter((a) => (marks[a.id] ? marks[a.id].block : a.block) === i)
               const tops = blockMarkerTops(blockItems, marks)
               return jsxs('div', { 'data-rl-block': String(i), className: 'rl-block', children: [
                 jsx('div', { className: 'rl-hl', children: blockItems.flatMap((a) => {
@@ -671,10 +699,13 @@ function RedlinePane({ ctx, file }) {
       shown ? (() => {
         const a = items.find((x) => x.id === shown)
         if (!a) return null
-        const blockEl = docRef.current && docRef.current.querySelector(`[data-rl-block="${a.block}"]`)
+        const block = marks[a.id] ? marks[a.id].block : a.block
+        const blockEl = docRef.current && docRef.current.querySelector(`[data-rl-block="${block}"]`)
         if (!blockEl || !mainRef.current) return null
         const bb = blockEl.getBoundingClientRect(), mb = mainRef.current.getBoundingClientRect()
-        const row = blockMarkerTops(items.filter((x) => x.block === a.block), marks).find((marker) => marker.id === a.id)
+        const row = blockMarkerTops(
+          items.filter((x) => (marks[x.id] ? marks[x.id].block : x.block) === block), marks,
+        ).find((marker) => marker.id === a.id)
         const top = clampToPane(bb.top - mb.top + (row ? row.top : MARKER_TOP), mb.height)
         return jsx('div', { style: { position: 'absolute', top, left: '50%', width: 'min(300px, 86%)', transform: 'translateX(-50%)', zIndex: 20 }, children: jsx(Card, {
           a, draftText, onDraftText: setDraftText, onSaveDraft: addDraft, onSend: sendOne,
@@ -710,7 +741,7 @@ function Chip() {
  * production consumer.
  */
 export const internals = {
-  locateQuote, spanFromPoints, spanForAnnotation, stackPositions, mergeBoxes, quantise, sameMarks,
+  locateQuote, spanFromPoints, spanForAnnotation, resolveBlock, stackPositions, mergeBoxes, quantise, sameMarks,
   washBoxes, markerGlyph, resolutionLine, blockMarkerTops, textNodesOf, selectionSpan, rangeIn,
 }
 

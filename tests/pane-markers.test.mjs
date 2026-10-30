@@ -141,6 +141,18 @@ test('a resolved thread with no agent action says how it was closed', async () =
   assert.match(String(line.props.children), /closed in the pane/)
 })
 
+test('draft cards make Add to list the primary action', async () => {
+  const render = await mount([{ ...thread('a1', 1, ''), draft: true }])
+  markers(render())[0].props.onClick()
+  const [wrapper] = find(render(), (node) => node.props?.style?.position === 'absolute')
+  const card = wrapper.props.children
+  const buttons = find(card.type(card.props), (node) => node.type === sdk.Button)
+  const add = buttons.find((node) => node.props.children === 'Add to list')
+  const send = buttons.find((node) => node.props.children === 'Send now')
+  assert.equal(add.props.variant, undefined, 'Add to list uses the primary button style')
+  assert.equal(send.props.variant, 'outline', 'Send now is secondary')
+})
+
 test('desktop/plugin.js only imports what the runtime loader maps', () => {
   const source = readFileSync(new URL('../desktop/plugin.js', import.meta.url), 'utf8')
   assert.deepEqual(unsupportedSpecifiers(source), [], 'runtime plugins may only import the SDK and react')

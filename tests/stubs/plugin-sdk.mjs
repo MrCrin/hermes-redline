@@ -9,6 +9,10 @@ export function __setQueryResult(key, value) {
 export function __reset() {
   query_results.clear()
   host.workspaces.length = 0
+  host.submissions.length = 0
+  host.errors.length = 0
+  host.focusedSessionId = 'test-session'
+  host.submitResult = true
 }
 
 export const STATUSBAR_AREAS = { right: 'statusbar.right' }
@@ -33,10 +37,17 @@ export const useQuery = ({ queryKey }) => ({
 
 export const host = {
   workspaces: [],
+  submissions: [],
+  errors: [],
+  focusedSessionId: 'test-session',
+  submitResult: true,
   notify() {},
-  notifyError() {},
-  composer: { submit: () => true },
-  state: { focusedSessionId: { get: () => 'test-session' } },
+  notifyError(message) { host.errors.push(message) },
+  composer: { submit: (sessionId, message) => {
+    host.submissions.push({ sessionId, message })
+    return host.submitResult
+  } },
+  state: { focusedSessionId: { get: () => host.focusedSessionId } },
   openWorkspace(_id, options) {
     host.workspaces.push(options)
   },

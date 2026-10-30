@@ -447,8 +447,8 @@ function Card({ a, draftText, onDraftText, onSaveDraft, onSend, onCancelDraft, o
       jsxs('div', { className: 'rl-foot', children: [
         jsx('button', { type: 'button', className: 'rl-mini', onClick: onCancelDraft, children: 'cancel' }),
         jsxs('span', { style: { display: 'flex', gap: 6 }, children: [
-          jsx(Button, { size: 'sm', variant: 'outline', disabled: !draftText.trim(), onClick: () => onSaveDraft(a.id, draftText), children: 'add to list' }),
-          jsx(Button, { size: 'sm', disabled: !draftText.trim(), onClick: () => onSend(a.id, draftText), children: 'send now' }),
+          jsx(Button, { size: 'sm', disabled: !draftText.trim(), onClick: () => onSaveDraft(a.id, draftText), children: 'Add to list' }),
+          jsx(Button, { size: 'sm', variant: 'outline', disabled: !draftText.trim(), onClick: () => onSend(a.id, draftText), children: 'Send now' }),
         ] }),
       ] }),
     ] })
@@ -473,7 +473,7 @@ function Card({ a, draftText, onDraftText, onSaveDraft, onSend, onCancelDraft, o
   ] })
 }
 
-function RedlinePane({ ctx, file }) {
+function RedlinePane({ ctx, file, targetSessionId }) {
   const [path, setPath] = useState(file || '')
   const [active, setActive] = useState(file || '')
   const [draftText, setDraftText] = useState('')
@@ -618,16 +618,14 @@ function RedlinePane({ ctx, file }) {
 
   const sendBatch = () => {
     if (!open.length) return
-    const ok = host.composer.submit(host.state.focusedSessionId.get(), buildBatchMessage(active, open))
-    if (!ok) { host.notifyError('redline: no open chat can receive the batch'); return }
+    if (!submitToTarget(targetSessionId, buildBatchMessage(active, open))) return
     save(items.map((a) => (a.status === 'open' ? { ...a, status: 'sent' } : a)))
     host.notify({ kind: 'info', message: `redline: ${open.length} annotations sent to Hermes` })
   }
   const sendOne = (id, note) => {
     const a = items.find((x) => x.id === id)
     if (!a) return
-    const ok = host.composer.submit(host.state.focusedSessionId.get(), buildBatchMessage(active, [{ ...a, note: note.trim(), draft: undefined }]))
-    if (!ok) { host.notifyError('redline: no open chat can receive the annotation'); return }
+    if (!submitToTarget(targetSessionId, buildBatchMessage(active, [{ ...a, note: note.trim(), draft: undefined }]))) return
     save(items.map((x) => (x.id === id ? { ...x, note: note.trim(), draft: undefined, status: 'sent' } : x)))
     setShown(null)
     setDraftText('')
@@ -726,6 +724,18 @@ function RedlinePane({ ctx, file }) {
   ] })
 }
 
+function submitToTarget(targetSessionId, message) {
+  if (!targetSessionId) {
+    host.notifyError('redline: this pane is detached; reopen it from a Redline card in the target chat')
+    return false
+  }
+  if (!host.composer.submit(targetSessionId, message)) {
+    host.notifyError('redline: target chat is unavailable; annotations remain unsent')
+    return false
+  }
+  return true
+}
+
 function Chip() {
   const n = useValue($openCount)
   if (!n) return null
@@ -742,7 +752,7 @@ function Chip() {
  */
 export const internals = {
   locateQuote, spanFromPoints, spanForAnnotation, resolveBlock, stackPositions, mergeBoxes, quantise, sameMarks,
-  washBoxes, markerGlyph, resolutionLine, blockMarkerTops, textNodesOf, selectionSpan, rangeIn,
+  washBoxes, markerGlyph, resolutionLine, blockMarkerTops, textNodesOf, selectionSpan, rangeIn, submitToTarget,
 }
 
 export default {
@@ -761,7 +771,7 @@ export default {
         area: TRANSCRIPT_DIRECTIVE_AREA,
         data: {
           name: 'redline', // The agent writes ::redline{file="/path/to/reviewable-file"}
-          render: ({ attrs }) => {
+          render: ({ attrs, sessionId }) => {
             const file = String(attrs.file || '').trim()
             if (!file || !(hasExt(file, MD_EXT) || hasExt(file, CODE_EXT))) return null
             return jsxs('div', {
@@ -774,7 +784,7 @@ export default {
                     title: 'redline',
                     dock: { pane: 'workspace', pos: 'right' },
                     minWidth: '420px',
-                    render: () => jsx(RedlinePane, { ctx, file }),
+                    render: () => jsx(RedlinePane, { ctx, file, targetSessionId: sessionId }, `${file}:${sessionId || ''}`),
                   }),
                   children: 'Review in Redline',
                 }) }),

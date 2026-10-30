@@ -15,7 +15,7 @@ Redline turns Markdown documents and supported source files into a review surfac
 - When the agent writes a reviewable Markdown document or supported source file with Hermes file tools, Redline automatically adds its card to the final response; agents can still emit a card manually when needed.
 - One click opens the file in a pane docked beside the chat — Markdown uses the app's own renderer; source files use numbered lines with optional syntax highlighting and your theme's colors.
 - Select any passage → a pill offers ◆ comment · ◇ question · ✎ change request.
-- Each annotation becomes a floating card over the text, with a small marker in the margin so you always see where the open threads are.
+- Each annotation becomes a floating card over the text. The passage it was made on carries a coloured wash and its marker sits beside those words in the margin, so a thread always shows which passage it belongs to. Threads that land on the same line stack.
 - Annotations persist in a sidecar next to your file (`<file><ext>.redline.json`, such as `doc.md.redline.json` or `app.tsx.redline.json`) — close the pane, come back tomorrow, your review is still there.
 
 ## The loop
@@ -75,7 +75,9 @@ Markdown: `.md`, `.markdown`. Source/config: `.py`, `.sh`, `.js`, `.ts`, `.tsx`,
 ## Known limits
 
 - One annotation card open at a time (click a margin marker to switch).
+- A thread that has been sent but not closed keeps a faded wash, so what is still in flight stays visible while you read.
+- Anchors are matched against the rendered text, so a passage edited beyond recognition loses its wash and its marker falls back to the block margin. Selections are stored with their offsets, so a repeated phrase anchors to the occurrence you selected; where only the quote is available (older sidecars, or offsets that no longer fit the text) matching takes the first occurrence.
 - Markdown renders through the chat's own renderer — tables, lists, code blocks yes; syntax highlighting depends on the chat provider.
-- Block anchors are paragraph indices captured at annotation time; heavily rewritten documents may need a re-select.
+- Block anchors are paragraph indices captured at annotation time, so the pane looks for the passage in that block first and then outward from it. If the words themselves are gone, the thread keeps its quote and falls back to a margin slot.
 
 MIT licensed. Feedback and forks welcome.
